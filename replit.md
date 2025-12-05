@@ -129,6 +129,13 @@ EchoBreaker is a web application + Chrome extension system designed to help user
   - 2D view: channels plotted on left-right spectrum with size by video count
   - 3D view: adds depth with rotation/zoom controls for exploring the bias landscape
   - Color coding: blue (left), green (center), red (right)
+- **NEW: AI-Adaptive DOM Selector Discovery**
+  - Automatically detects when YouTube changes its DOM structure
+  - Uses GPT-4o-mini to analyze HTML and generate new CSS selectors
+  - Three-tier fallback: cached selectors → default selectors → AI-generated
+  - Server-side selector caching with 24-hour TTL to reduce API costs
+  - Client-side caching in chrome.storage.local for instant retrieval
+  - API endpoint: `POST /api/analyze-dom` and `GET /api/selectors`
 
 ## Known Limitations
 - Chrome extension needs icon files (16x16, 48x48, 128x128 PNG) - removed from manifest to allow loading
