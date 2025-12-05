@@ -409,6 +409,114 @@
       text-align: center;
       margin-bottom: 12px;
     }
+
+    /* DOM Access Status */
+    .dom-status {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px;
+      background: #171717;
+      border: 1px solid #262626;
+      border-radius: 10px;
+      margin-bottom: 16px;
+    }
+
+    .dom-status.success {
+      border-color: #22c55e40;
+      background: #22c55e10;
+    }
+
+    .dom-status.error {
+      border-color: #ef444440;
+      background: #ef444410;
+    }
+
+    .dom-status.warning {
+      border-color: #f59e0b40;
+      background: #f59e0b10;
+    }
+
+    .dom-status-icon {
+      width: 32px;
+      height: 32px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .dom-status-icon svg {
+      width: 24px;
+      height: 24px;
+      display: none;
+    }
+
+    .dom-status-icon .icon-loading {
+      display: block;
+      color: #737373;
+      animation: spin 1.5s linear infinite;
+    }
+
+    .dom-status.success .dom-status-icon .icon-loading { display: none; }
+    .dom-status.success .dom-status-icon .icon-success { display: block; color: #22c55e; }
+
+    .dom-status.error .dom-status-icon .icon-loading { display: none; }
+    .dom-status.error .dom-status-icon .icon-error { display: block; color: #ef4444; }
+
+    .dom-status.warning .dom-status-icon .icon-loading { display: none; }
+    .dom-status.warning .dom-status-icon .icon-warning { display: block; color: #f59e0b; }
+
+    .dom-status-text {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .dom-status-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: #e5e5e5;
+    }
+
+    .dom-status.success .dom-status-title { color: #22c55e; }
+    .dom-status.error .dom-status-title { color: #ef4444; }
+    .dom-status.warning .dom-status-title { color: #f59e0b; }
+
+    .dom-status-desc {
+      font-size: 11px;
+      color: #737373;
+    }
+
+    .dom-refresh-btn {
+      width: 32px;
+      height: 32px;
+      border: none;
+      background: #262626;
+      border-radius: 8px;
+      color: #e5e5e5;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s;
+      flex-shrink: 0;
+    }
+
+    .dom-refresh-btn:hover {
+      background: #333;
+      transform: rotate(45deg);
+    }
+
+    .dom-refresh-btn svg {
+      width: 16px;
+      height: 16px;
+    }
+
+    .dom-status.success .dom-refresh-btn {
+      display: none;
+    }
   </style>
 </head>
 <body>
@@ -437,6 +545,39 @@
 
   <div class="content">
     <div class="tab-content active" id="tab-home">
+      <!-- DOM Access Status -->
+      <div class="dom-status" id="dom-status">
+        <div class="dom-status-icon" id="dom-status-icon">
+          <svg class="icon-loading" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"></circle>
+          </svg>
+          <svg class="icon-success" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+            <polyline points="22 4 12 14.01 9 11.01"></polyline>
+          </svg>
+          <svg class="icon-error" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"></circle>
+            <line x1="15" y1="9" x2="9" y2="15"></line>
+            <line x1="9" y1="9" x2="15" y2="15"></line>
+          </svg>
+          <svg class="icon-warning" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+            <line x1="12" y1="9" x2="12" y2="13"></line>
+            <line x1="12" y1="17" x2="12.01" y2="17"></line>
+          </svg>
+        </div>
+        <div class="dom-status-text">
+          <span class="dom-status-title" id="dom-status-title">Checking...</span>
+          <span class="dom-status-desc" id="dom-status-desc">Verifying DOM access</span>
+        </div>
+        <button class="dom-refresh-btn" id="dom-refresh-btn" title="Refresh YouTube tab">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path>
+            <path d="M3 3v5h5"></path>
+          </svg>
+        </button>
+      </div>
+
       <div class="stats-grid">
         <div class="stat-card">
           <div class="stat-value" id="videos-count">0</div>

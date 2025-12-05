@@ -35,6 +35,15 @@ document.addEventListener('DOMContentLoaded', async () => {
   const saveSettingsBtn = document.getElementById('save-settings-btn');
   const testConnectionBtn = document.getElementById('test-connection-btn');
   const saveSuccess = document.getElementById('save-success');
+  
+  // DOM Status elements
+  const domStatus = document.getElementById('dom-status');
+  const domStatusTitle = document.getElementById('dom-status-title');
+  const domStatusDesc = document.getElementById('dom-status-desc');
+  const domRefreshBtn = document.getElementById('dom-refresh-btn');
+
+  // Check DOM access status first
+  await checkDomAccess();
 
   // Load settings
   let settings = {};
@@ -61,6 +70,95 @@ document.addEventListener('DOMContentLoaded', async () => {
     statusDot.classList.add('error');
     statusText.textContent = 'Error';
   }
+
+  // Check DOM access
+  async function checkDomAccess() {
+    try {
+      // Find active YouTube tab
+      const tabs = await chrome.tabs.query({ 
+        active: true,
+        currentWindow: true
+      });
+      
+      const activeTab = tabs[0];
+      
+      // Check if it's a YouTube page
+      if (!activeTab || !activeTab.url || 
+          (!activeTab.url.includes('youtube.com') && !activeTab.url.includes('youtu.be'))) {
+        // Not on YouTube
+        domStatus.className = 'dom-status warning';
+        domStatusTitle.textContent = 'YouTube 페이지가 아닙니다';
+        domStatusDesc.textContent = 'YouTube를 열어주세요';
+        return;
+      }
+      
+      // Try to send a ping to content script
+      try {
+        const response = await chrome.tabs.sendMessage(activeTab.id, { type: 'GET_STATUS' });
+        
+        if (response) {
+          // Content script is responding
+          domStatus.className = 'dom-status success';
+          domStatusTitle.textContent = 'DOM 접근 가능';
+          domStatusDesc.textContent = `페이지 타입: ${translatePageType(response.pageType)}`;
+        } else {
+          throw new Error('No response');
+        }
+      } catch (msgError) {
+        // Content script not responding
+        console.log('Content script not responding:', msgError.message);
+        domStatus.className = 'dom-status error';
+        domStatusTitle.textContent = 'DOM 접근 불가';
+        domStatusDesc.textContent = '페이지를 새로고침(F5)해주세요';
+      }
+      
+    } catch (error) {
+      console.error('Error checking DOM access:', error);
+      domStatus.className = 'dom-status error';
+      domStatusTitle.textContent = '상태 확인 실패';
+      domStatusDesc.textContent = error.message;
+    }
+  }
+  
+  function translatePageType(pageType) {
+    const translations = {
+      'home': '홈',
+      'watch': '동영상 시청',
+      'subscriptions': '구독',
+      'history': '시청 기록',
+      'channel': '채널',
+      'other': '기타'
+    };
+    return translations[pageType] || pageType;
+  }
+
+  // Refresh button - reload YouTube tab
+  domRefreshBtn.addEventListener('click', async () => {
+    try {
+      const tabs = await chrome.tabs.query({ 
+        active: true,
+        currentWindow: true
+      });
+      
+      if (tabs[0] && tabs[0].url && tabs[0].url.includes('youtube.com')) {
+        await chrome.tabs.reload(tabs[0].id);
+        
+        // Wait and recheck
+        domStatus.className = 'dom-status';
+        domStatusTitle.textContent = '새로고침 중...';
+        domStatusDesc.textContent = '잠시만 기다려주세요';
+        
+        setTimeout(async () => {
+          await checkDomAccess();
+        }, 3000);
+      } else {
+        // Open YouTube if not on YouTube
+        await chrome.tabs.create({ url: 'https://www.youtube.com' });
+      }
+    } catch (error) {
+      console.error('Failed to refresh:', error);
+    }
+  });
 
   // Auto-sync toggle
   autoSyncToggle.addEventListener('click', () => {
@@ -140,6 +238,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         // Refresh stats
         const url = apiUrlInput.value.trim() || DEFAULT_API_URL;
         await loadStats(url);
+        
+        // Recheck DOM status
+        await checkDomAccess();
       } else {
         throw new Error(result.error || 'Sync failed');
       }
