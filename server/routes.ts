@@ -661,6 +661,7 @@ Focus on high-quality, popular videos from reputable sources that offer balanced
         subscriptionsCount: data.subscriptions?.length || 0,
         recommendedCount: data.recommendedVideos?.length || 0,
         extensionVersion: (data as any).extensionVersion,
+        hasDatabase: !!process.env.DATABASE_URL,
       });
       
       // Update extension connection status
@@ -746,8 +747,12 @@ Focus on high-quality, popular videos from reputable sources that offer balanced
         message: "Data received",
         received: results
       });
-    } catch (error) {
-      res.status(500).json({ error: "Failed to process crawl data" });
+    } catch (error: any) {
+      console.error("[Crawl] Error processing data:", error);
+      res.status(500).json({ 
+        error: "Failed to process crawl data",
+        details: error?.message || String(error)
+      });
     }
   });
 
