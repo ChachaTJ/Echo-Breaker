@@ -1,12 +1,13 @@
 {
   "manifest_version": 3,
   "name": "EchoBreaker - YouTube Balance",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Break the YouTube echo chamber by analyzing your content consumption and getting diverse recommendations.",
   "permissions": [
     "storage",
     "tabs",
-    "activeTab"
+    "activeTab",
+    "scripting"
   ],
   "host_permissions": [
     "https://www.youtube.com/*",

@@ -67,28 +67,53 @@ async function handleSyncComplete(data) {
 
 async function triggerSync() {
   try {
-    // Find active YouTube tab and trigger collection
+    // Find YouTube tabs
     const tabs = await chrome.tabs.query({ 
-      active: true, 
       url: ['*://www.youtube.com/*', '*://youtube.com/*'] 
     });
     
     if (tabs.length === 0) {
-      // Try any YouTube tab
-      const allTabs = await chrome.tabs.query({ 
-        url: ['*://www.youtube.com/*', '*://youtube.com/*'] 
-      });
-      
-      if (allTabs.length > 0) {
-        await chrome.tabs.sendMessage(allTabs[0].id, { type: 'COLLECT_NOW' });
-        return { success: true };
-      }
-      
-      return { success: false, error: 'No YouTube tab found' };
+      return { success: false, error: 'YouTube 탭을 찾을 수 없습니다. YouTube를 열어주세요.' };
     }
     
-    await chrome.tabs.sendMessage(tabs[0].id, { type: 'COLLECT_NOW' });
-    return { success: true };
+    // Try to send message to each tab until one succeeds
+    let lastError = null;
+    for (const tab of tabs) {
+      try {
+        // First check if content script is injected
+        const response = await chrome.tabs.sendMessage(tab.id, { type: 'COLLECT_NOW' });
+        if (response && response.success) {
+          return { success: true };
+        }
+      } catch (error) {
+        lastError = error;
+        console.log(`[EchoBreaker] Tab ${tab.id} not ready:`, error.message);
+        
+        // Try to inject content script manually
+        try {
+          await chrome.scripting.executeScript({
+            target: { tabId: tab.id },
+            files: ['content.js']
+          });
+          
+          // Wait a bit then try again
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          
+          const retryResponse = await chrome.tabs.sendMessage(tab.id, { type: 'COLLECT_NOW' });
+          if (retryResponse && retryResponse.success) {
+            return { success: true };
+          }
+        } catch (injectError) {
+          console.log(`[EchoBreaker] Failed to inject script:`, injectError.message);
+        }
+      }
+    }
+    
+    return { 
+      success: false, 
+      error: 'YouTube 페이지를 새로고침(F5)한 후 다시 시도해주세요.' 
+    };
+    
   } catch (error) {
     console.error('[EchoBreaker] Sync error:', error);
     return { success: false, error: error.message };
