@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>EchoBreaker</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      width: 380px;
+      min-height: 400px;
+      background: #0f0f0f;
+      color: #e5e5e5;
+    }
+
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 16px;
+      border-bottom: 1px solid #262626;
+      background: #171717;
+    }
+
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .logo-icon {
+      width: 32px;
+      height: 32px;
+      background: linear-gradient(135deg, #ef4444 0%, #f97316 100%);
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .logo-icon svg {
+      width: 18px;
+      height: 18px;
+      color: white;
+    }
+
+    .logo-text {
+      font-weight: 600;
+      font-size: 16px;
+    }
+
+    .status-badge {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      background: #262626;
+      border-radius: 9999px;
+      font-size: 12px;
+    }
+
+    .status-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #22c55e;
+    }
+
+    .status-dot.syncing {
+      background: #f59e0b;
+      animation: pulse 1.5s infinite;
+    }
+
+    .status-dot.error {
+      background: #ef4444;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+
+    .content {
+      padding: 16px;
+    }
+
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+
+    .stat-card {
+      background: #171717;
+      border: 1px solid #262626;
+      border-radius: 12px;
+      padding: 14px;
+    }
+
+    .stat-value {
+      font-size: 28px;
+      font-weight: 700;
+      color: #fff;
+    }
+
+    .stat-label {
+      font-size: 12px;
+      color: #737373;
+      margin-top: 4px;
+    }
+
+    .bias-section {
+      background: #171717;
+      border: 1px solid #262626;
+      border-radius: 12px;
+      padding: 16px;
+      margin-bottom: 16px;
+    }
+
+    .bias-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+
+    .bias-title {
+      font-weight: 600;
+      font-size: 14px;
+    }
+
+    .bias-score {
+      font-size: 20px;
+      font-weight: 700;
+      color: #22c55e;
+    }
+
+    .bias-score.warning {
+      color: #f59e0b;
+    }
+
+    .bias-score.danger {
+      color: #ef4444;
+    }
+
+    .bias-bar {
+      height: 8px;
+      background: linear-gradient(to right, #3b82f6, #22c55e, #ef4444);
+      border-radius: 4px;
+      position: relative;
+      margin-bottom: 8px;
+    }
+
+    .bias-indicator {
+      position: absolute;
+      top: -2px;
+      width: 4px;
+      height: 12px;
+      background: white;
+      border-radius: 2px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+      transition: left 0.3s ease;
+    }
+
+    .bias-labels {
+      display: flex;
+      justify-content: space-between;
+      font-size: 10px;
+      color: #737373;
+    }
+
+    .actions {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 12px 16px;
+      border: none;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, #ef4444 0%, #f97316 100%);
+      color: white;
+    }
+
+    .btn-primary:hover {
+      opacity: 0.9;
+      transform: translateY(-1px);
+    }
+
+    .btn-secondary {
+      background: #262626;
+      color: #e5e5e5;
+    }
+
+    .btn-secondary:hover {
+      background: #333;
+    }
+
+    .btn svg {
+      width: 16px;
+      height: 16px;
+    }
+
+    .footer {
+      padding: 12px 16px;
+      border-top: 1px solid #262626;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 11px;
+      color: #737373;
+    }
+
+    .footer a {
+      color: #ef4444;
+      text-decoration: none;
+    }
+
+    .footer a:hover {
+      text-decoration: underline;
+    }
+
+    .loading {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 40px;
+    }
+
+    .spinner {
+      width: 24px;
+      height: 24px;
+      border: 2px solid #262626;
+      border-top-color: #ef4444;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .message {
+      text-align: center;
+      padding: 20px;
+      color: #737373;
+      font-size: 13px;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="logo">
+      <div class="logo-icon">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 3v18h18"></path>
+          <path d="M18 17V9"></path>
+          <path d="M13 17V5"></path>
+          <path d="M8 17v-3"></path>
+        </svg>
+      </div>
+      <span class="logo-text">EchoBreaker</span>
+    </div>
+    <div class="status-badge" id="status">
+      <span class="status-dot" id="status-dot"></span>
+      <span id="status-text">Connected</span>
+    </div>
+  </div>
+
+  <div class="content" id="content">
+    <div class="loading" id="loading">
+      <div class="spinner"></div>
+    </div>
+
+    <div id="main-content" style="display: none;">
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-value" id="videos-count">0</div>
+          <div class="stat-label">Videos Collected</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" id="recommendations-count">0</div>
+          <div class="stat-label">Recommendations</div>
+        </div>
+      </div>
+
+      <div class="bias-section">
+        <div class="bias-header">
+          <span class="bias-title">Content Bias Score</span>
+          <span class="bias-score" id="bias-score">50</span>
+        </div>
+        <div class="bias-bar">
+          <div class="bias-indicator" id="bias-indicator" style="left: calc(50% - 2px);"></div>
+        </div>
+        <div class="bias-labels">
+          <span>Left</span>
+          <span>Balanced</span>
+          <span>Right</span>
+        </div>
+      </div>
+
+      <div class="actions">
+        <button class="btn btn-primary" id="sync-btn">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path>
+            <path d="M3 3v5h5"></path>
+            <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"></path>
+            <path d="M16 16h5v5"></path>
+          </svg>
+          Sync Now
+        </button>
+        <button class="btn btn-secondary" id="dashboard-btn">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+            <polyline points="15 3 21 3 21 9"></polyline>
+            <line x1="10" y1="14" x2="21" y2="3"></line>
+          </svg>
+          Open Dashboard
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div class="footer">
+    <span id="last-sync">Last sync: Never</span>
+    <a href="#" id="settings-link">Settings</a>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
