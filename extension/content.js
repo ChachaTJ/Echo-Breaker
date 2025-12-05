@@ -895,27 +895,75 @@
     return { videos, shorts };
   }
   
-  // Extract short data from a DOM element
+  // Extract short data from a DOM element - YouTube 2024 DOM structure
   async function extractShortFromElement(el) {
     try {
-      const linkEl = findElement('a#thumbnail, a[href*="/shorts/"], a', el);
-      const titleEl = findElement('#video-title, #details h3, yt-formatted-string', el);
-      const channelEl = findElement('#channel-name, ytd-channel-name, #text', el);
+      let videoId = null;
+      let title = 'Short';
+      let channelName = 'Unknown';
       
-      const href = linkEl?.getAttribute('href') || '';
-      const shortsMatch = href.match(/\/shorts\/([a-zA-Z0-9_-]+)/);
-      const videoId = shortsMatch ? shortsMatch[1] : null;
+      // Strategy 1: Try YouTube's internal data property
+      if (el.data) {
+        const data = el.data;
+        const reelRenderer = data.content?.reelItemRenderer ||
+                            data.richItemRenderer?.content?.reelItemRenderer ||
+                            data.reelItemRenderer;
+        
+        if (reelRenderer) {
+          videoId = reelRenderer.videoId;
+          title = reelRenderer.headline?.simpleText || 
+                  reelRenderer.headline?.runs?.[0]?.text || 'Short';
+          channelName = reelRenderer.navigationEndpoint?.browseEndpoint?.canonicalBaseUrl?.replace('/@', '') ||
+                       'Unknown';
+        }
+      }
+      
+      // Strategy 2: Try inner component's data
+      if (!videoId) {
+        const innerMedia = el.querySelector('ytd-rich-grid-slim-media, ytd-reel-item-renderer');
+        if (innerMedia?.data) {
+          const rr = innerMedia.data.reelItemRenderer || innerMedia.data;
+          videoId = rr.videoId;
+          title = rr.headline?.simpleText || rr.headline?.runs?.[0]?.text || 'Short';
+        }
+      }
+      
+      // Strategy 3: Parse from href (fallback)
+      if (!videoId) {
+        const shortsLink = el.querySelector('a[href*="/shorts/"]');
+        if (shortsLink) {
+          const href = shortsLink.getAttribute('href');
+          const match = href.match(/\/shorts\/([a-zA-Z0-9_-]+)/);
+          if (match) {
+            videoId = match[1];
+          }
+          
+          // Try aria-label for title
+          const ariaLabel = shortsLink.getAttribute('aria-label');
+          if (ariaLabel && ariaLabel.length > 2) {
+            title = ariaLabel;
+          }
+        }
+      }
+      
+      // Strategy 4: Get title from DOM
+      if (title === 'Short' && videoId) {
+        const titleEl = el.querySelector('#video-title, h3 yt-formatted-string, yt-formatted-string#video-title');
+        if (titleEl?.textContent?.trim()) {
+          title = titleEl.textContent.trim();
+        }
+      }
       
       if (!videoId) return null;
       
       return {
         videoId,
-        title: titleEl?.textContent?.trim() || 'Short',
-        channelName: channelEl?.textContent?.trim() || 'Unknown',
-        channelId: extractChannelId(channelEl?.querySelector('a')?.href),
+        title,
+        channelName,
         thumbnailUrl: `https://img.youtube.com/vi/${videoId}/mqdefault.jpg`,
         duration: 'SHORT',
         source: 'shorts',
+        sourcePhase: 'shorts',
         collectedAt: new Date().toISOString()
       };
     } catch (e) {
@@ -923,143 +971,134 @@
     }
   }
   
-  // Extract video data from a DOM element
+  // Extract video data from a DOM element - YouTube 2024 DOM structure
   async function extractVideoFromElement(el) {
     try {
-      // Try multiple selector strategies for title
-      const titleSelectors = [
-        '#video-title',
-        'a#video-title-link',
-        '#video-title-link yt-formatted-string',
-        'h3 a#video-title',
-        'yt-formatted-string#video-title',
-        '#details #video-title',
-        'ytd-rich-grid-media #video-title',
-        '[id="video-title"]',
-        'a[id="video-title"]',
-        '#dismissible #video-title'
-      ];
+      let videoId = null;
+      let title = '';
+      let channelName = 'Unknown';
+      let isShort = false;
       
-      let titleEl = null;
-      let titleText = '';
-      for (const sel of titleSelectors) {
-        const found = el.querySelector(sel);
-        if (found && found.textContent?.trim()) {
-          titleEl = found;
-          titleText = found.textContent.trim();
-          break;
+      // Strategy 1: Try YouTube's internal data property (most reliable)
+      if (el.data) {
+        const data = el.data;
+        // Check for different data structures
+        const videoRenderer = data.content?.videoRenderer || 
+                             data.richItemRenderer?.content?.videoRenderer ||
+                             data.videoRenderer;
+        
+        if (videoRenderer) {
+          videoId = videoRenderer.videoId;
+          title = videoRenderer.title?.runs?.[0]?.text || 
+                  videoRenderer.title?.simpleText || '';
+          channelName = videoRenderer.ownerText?.runs?.[0]?.text ||
+                       videoRenderer.shortBylineText?.runs?.[0]?.text || 'Unknown';
+        }
+        
+        // Check for shorts
+        const reelRenderer = data.content?.reelItemRenderer ||
+                            data.richItemRenderer?.content?.reelItemRenderer ||
+                            data.reelItemRenderer;
+        if (reelRenderer) {
+          isShort = true;
+          videoId = reelRenderer.videoId;
+          title = reelRenderer.headline?.simpleText || 'Short';
         }
       }
       
-      // Try to get title from aria-label as fallback
-      if (!titleText) {
-        const ariaEl = el.querySelector('[aria-label]');
-        if (ariaEl) {
-          const ariaLabel = ariaEl.getAttribute('aria-label');
-          if (ariaLabel && ariaLabel.length > 5) {
-            titleText = ariaLabel.split(' by ')[0] || ariaLabel;
+      // Strategy 2: Try inner component's data property
+      if (!videoId) {
+        const innerMedia = el.querySelector('ytd-rich-grid-media, ytd-video-renderer');
+        if (innerMedia?.data) {
+          const vr = innerMedia.data.videoRenderer || innerMedia.data;
+          videoId = vr.videoId;
+          title = vr.title?.runs?.[0]?.text || vr.title?.simpleText || '';
+          channelName = vr.ownerText?.runs?.[0]?.text || 
+                       vr.shortBylineText?.runs?.[0]?.text || 'Unknown';
+        }
+      }
+      
+      // Strategy 3: Parse from href and aria-label (fallback)
+      if (!videoId) {
+        // Get video ID from any watch link
+        const watchLink = el.querySelector('a[href*="/watch?v="]');
+        if (watchLink) {
+          const href = watchLink.getAttribute('href');
+          videoId = extractVideoId(href);
+        }
+        
+        // Check for shorts link
+        const shortsLink = el.querySelector('a[href*="/shorts/"]');
+        if (shortsLink) {
+          const href = shortsLink.getAttribute('href');
+          const match = href.match(/\/shorts\/([a-zA-Z0-9_-]+)/);
+          if (match) {
+            videoId = match[1];
+            isShort = true;
           }
         }
       }
       
-      // Try multiple selector strategies for link
-      const linkSelectors = [
-        'a#thumbnail',
-        'a.ytd-thumbnail',
-        'ytd-thumbnail a',
-        'a[href*="/watch"]',
-        '#thumbnail',
-        '#dismissible a[href*="/watch"]'
-      ];
-      
-      let linkEl = null;
-      let href = '';
-      for (const sel of linkSelectors) {
-        const found = el.querySelector(sel);
-        const foundHref = found?.getAttribute('href');
-        if (foundHref && foundHref.includes('/watch')) {
-          linkEl = found;
-          href = foundHref;
-          break;
+      // Strategy 4: Get title from aria-label or DOM
+      if (!title && videoId) {
+        // Try aria-label on thumbnail
+        const thumbnail = el.querySelector('a#thumbnail, ytd-thumbnail a');
+        if (thumbnail) {
+          const ariaLabel = thumbnail.getAttribute('aria-label');
+          if (ariaLabel && ariaLabel.length > 5) {
+            // aria-label format: "Title by Channel X views Y time ago Duration"
+            const parts = ariaLabel.split(' by ');
+            if (parts.length >= 2) {
+              title = parts[0].trim();
+              // Try to extract channel from aria-label
+              const channelPart = parts[1].split(/\d+[,.]?\d*\s*(조회|views|view)/i)[0];
+              if (channelPart && channelPart.trim()) {
+                channelName = channelPart.trim();
+              }
+            } else {
+              title = ariaLabel;
+            }
+          }
+        }
+        
+        // Also try #video-title text
+        const titleEl = el.querySelector('#video-title');
+        if (titleEl?.textContent?.trim()) {
+          title = titleEl.textContent.trim();
+        }
+        
+        // Try channel name from DOM
+        const channelEl = el.querySelector('#channel-name a, ytd-channel-name a, ytd-channel-name #text');
+        if (channelEl?.textContent?.trim()) {
+          channelName = channelEl.textContent.trim();
         }
       }
       
-      // Also check title element for href
-      if (!href && titleEl) {
-        const titleHref = titleEl.getAttribute('href') || titleEl.closest('a')?.getAttribute('href');
-        if (titleHref && titleHref.includes('/watch')) {
-          href = titleHref;
-        }
-      }
-      
-      // Try multiple selector strategies for channel
-      const channelSelectors = [
-        '#channel-name a',
-        'ytd-channel-name a',
-        '#text-container a',
-        '#text a',
-        'ytd-channel-name #text',
-        '#channel-name #text',
-        '#channel-name yt-formatted-string',
-        '.ytd-channel-name'
-      ];
-      
-      let channelName = 'Unknown';
-      for (const sel of channelSelectors) {
-        const found = el.querySelector(sel);
-        if (found && found.textContent?.trim()) {
-          channelName = found.textContent.trim();
-          break;
-        }
-      }
-      
-      // Debug logging for first few elements
+      // Debug logging
       if (!window._ebDebugCount) window._ebDebugCount = 0;
       if (window._ebDebugCount < 5) {
-        await log('info', `요소 추출 디버그 #${window._ebDebugCount + 1}`, {
-          tag: el.tagName,
-          hasTitle: !!titleText,
-          title: titleText?.substring(0, 25),
-          hasHref: !!href,
-          href: href?.substring(0, 40),
-          channel: channelName?.substring(0, 20)
+        await log('info', `추출 #${window._ebDebugCount + 1}`, {
+          hasData: !!el.data,
+          videoId: videoId?.substring(0, 8),
+          title: title?.substring(0, 20),
+          channel: channelName?.substring(0, 15),
+          isShort
         });
         window._ebDebugCount++;
       }
 
-      // Skip if no title found
-      if (!titleText) {
-        return null;
-      }
+      // Must have video ID
+      if (!videoId) return null;
       
-      // Skip if this is a shorts link
-      if (href.includes('/shorts/')) return null;
+      // Skip shorts here (they're handled separately)
+      if (isShort) return null;
       
-      const videoId = extractVideoId(href);
-      if (!videoId) {
-        // Try to extract from any anchor in the element
-        const anyAnchor = el.querySelector('a[href*="/watch?v="]');
-        if (anyAnchor) {
-          const anyHref = anyAnchor.getAttribute('href');
-          const anyVideoId = extractVideoId(anyHref);
-          if (anyVideoId) {
-            return {
-              videoId: anyVideoId,
-              title: titleText,
-              channelName,
-              thumbnailUrl: `https://img.youtube.com/vi/${anyVideoId}/mqdefault.jpg`,
-              source: 'home_feed',
-              sourcePhase: 'home_feed',
-              collectedAt: new Date().toISOString()
-            };
-          }
-        }
-        return null;
-      }
+      // Must have title
+      if (!title) return null;
 
       return {
         videoId,
-        title: titleText,
+        title,
         channelName,
         thumbnailUrl: `https://img.youtube.com/vi/${videoId}/mqdefault.jpg`,
         source: 'home_feed',
