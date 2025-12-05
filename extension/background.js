@@ -22,6 +22,21 @@ chrome.runtime.onInstalled.addListener(async () => {
   const settings = { ...DEFAULT_SETTINGS, ...stored };
   await chrome.storage.local.set(settings);
   
+  // Create context menu for incognito viewing
+  chrome.contextMenus.create({
+    id: 'echobreaker-open-safe',
+    title: 'EchoBreaker: Open without affecting algorithm',
+    contexts: ['link'],
+    documentUrlPatterns: ['*://www.youtube.com/*', '*://youtube.com/*']
+  });
+  
+  chrome.contextMenus.create({
+    id: 'echobreaker-open-safe-video',
+    title: 'EchoBreaker: Open video without affecting algorithm',
+    contexts: ['video'],
+    documentUrlPatterns: ['*://www.youtube.com/*', '*://youtube.com/*']
+  });
+  
   // Start ping interval
   startPingInterval();
 });
@@ -261,3 +276,80 @@ chrome.tabs.onRemoved.addListener((tabId) => {
     }
   }
 });
+
+// Context menu handler for opening videos without affecting algorithm
+chrome.contextMenus.onClicked.addListener(async (info, tab) => {
+  if (info.menuItemId === 'echobreaker-open-safe' || info.menuItemId === 'echobreaker-open-safe-video') {
+    let url = info.linkUrl || info.srcUrl || info.pageUrl;
+    
+    // Extract video URL from various YouTube URL formats
+    if (url) {
+      // Handle youtu.be short links
+      if (url.includes('youtu.be/')) {
+        const videoId = url.split('youtu.be/')[1]?.split('?')[0];
+        if (videoId) {
+          url = `https://www.youtube.com/watch?v=${videoId}`;
+        }
+      }
+      
+      // Ensure it's a YouTube video URL
+      if (url.includes('youtube.com') || url.includes('youtu.be')) {
+        try {
+          // Try to open in incognito window
+          await chrome.windows.create({
+            url: url,
+            incognito: true,
+            focused: true
+          });
+          console.log('[EchoBreaker] Opened in incognito:', url);
+        } catch (error) {
+          // If incognito fails (user may have disabled), open in new regular window with note
+          console.log('[EchoBreaker] Incognito failed, trying logged-out approach:', error.message);
+          
+          // Open in a new window - user may need to manually log out or use private browsing
+          await chrome.windows.create({
+            url: url,
+            focused: true
+          });
+          
+          // Notify user
+          chrome.notifications?.create?.({
+            type: 'basic',
+            iconUrl: 'icons/icon48.png',
+            title: 'EchoBreaker',
+            message: 'Incognito mode is disabled. To avoid affecting your algorithm, please log out of YouTube in this window.'
+          });
+        }
+      }
+    }
+  }
+});
+
+// Handle messages for getting video stance info
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.type === 'GET_VIDEO_STANCES') {
+    getVideoStances(message.videoIds).then(sendResponse);
+    return true;
+  }
+});
+
+async function getVideoStances(videoIds) {
+  try {
+    const stored = await chrome.storage.local.get(['apiUrl']);
+    const apiUrl = stored.apiUrl || DEFAULT_SETTINGS.apiUrl;
+    
+    const response = await fetch(`${apiUrl}/api/videos/stances`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ videoIds })
+    });
+    
+    if (response.ok) {
+      return await response.json();
+    }
+    return { stances: {} };
+  } catch (error) {
+    console.log('[EchoBreaker] Failed to get video stances:', error.message);
+    return { stances: {} };
+  }
+}
