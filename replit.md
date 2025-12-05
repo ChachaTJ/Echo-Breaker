@@ -124,6 +124,11 @@ EchoBreaker is a web application + Chrome extension system designed to help user
 - OpenAI integration for AI-powered bias analysis with graceful fallbacks
 - Theme system with dark/light mode toggle
 - Proper error handling for API endpoints
+- **NEW: 2D-3D Echo Chamber Visualization** (inspired by PolitEcho)
+  - Interactive visualization showing channel distribution by political bias
+  - 2D view: channels plotted on left-right spectrum with size by video count
+  - 3D view: adds depth with rotation/zoom controls for exploring the bias landscape
+  - Color coding: blue (left), green (center), red (right)
 
 ## Known Limitations
 - Chrome extension needs icon files (16x16, 48x48, 128x128 PNG) - removed from manifest to allow loading

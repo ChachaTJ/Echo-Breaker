@@ -6,6 +6,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { BiasMeter } from "@/components/bias-meter";
 import { CategoryChart } from "@/components/category-chart";
+import { BiasVisualization } from "@/components/bias-visualization";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
@@ -185,6 +186,8 @@ export default function Analysis() {
               </CardContent>
             </Card>
           </div>
+
+          <BiasVisualization videos={videos || []} analysis={analysis} />
 
           {analysis.biasScore < 35 || analysis.biasScore > 65 ? (
             <Card className="border-orange-500/50 bg-orange-500/5">
