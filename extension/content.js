@@ -191,14 +191,16 @@
       let title = '';
       let channelName = 'Unknown';
       let isShort = false;
+      let metadata = { viewCount: null, uploadDate: null };
       
       const lockupModel = card.querySelector('.yt-lockup-view-model') || card;
       const lockupClasses = lockupModel.className || '';
       
-      // === Step 1: Try using provided videoIdSelector ===
+      // === Step 1: Try using provided videoIdSelector (supports href and data attributes) ===
       if (selectors.videoIdSelector && !videoId) {
         const linkEl = card.querySelector(selectors.videoIdSelector);
         if (linkEl) {
+          // Try href first
           const href = linkEl.getAttribute('href') || '';
           const watchMatch = href.match(/[?&]v=([a-zA-Z0-9_-]+)/);
           const shortsMatch = href.match(/\/shorts\/([a-zA-Z0-9_-]+)/);
@@ -206,6 +208,11 @@
           if (shortsMatch) {
             videoId = shortsMatch[1];
             isShort = true;
+          }
+          // Try data attributes if no href match
+          if (!videoId) {
+            const dataId = linkEl.getAttribute('data-id') || linkEl.getAttribute('data-video-id');
+            if (dataId) videoId = dataId;
           }
         }
       }
@@ -218,7 +225,15 @@
         }
       }
       
-      // === Step 3: Fallback - get from href links ===
+      // === Step 3: Check data attributes on card/lockup model ===
+      if (!videoId) {
+        const dataId = card.getAttribute('data-id') || 
+                       card.getAttribute('data-video-id') ||
+                       lockupModel.getAttribute('data-id');
+        if (dataId) videoId = dataId;
+      }
+      
+      // === Step 4: Fallback - get from href links ===
       if (!videoId) {
         const watchLink = card.querySelector('a[href*="/watch?v="]');
         if (watchLink) {
@@ -267,10 +282,24 @@
         if (subtitleEl) channelName = subtitleEl.textContent?.trim() || 'Unknown';
       }
       
+      // === Get metadata using provided metaSelector ===
+      if (selectors.metaSelector) {
+        const metaEl = card.querySelector(selectors.metaSelector);
+        if (metaEl) {
+          const metaText = metaEl.textContent?.trim() || '';
+          // Parse view count (e.g., "123K views", "1.2M views")
+          const viewMatch = metaText.match(/([0-9.,]+[KMB]?)\s*views?/i);
+          if (viewMatch) metadata.viewCount = viewMatch[1];
+          // Parse upload date (e.g., "2 days ago", "3 weeks ago")
+          const dateMatch = metaText.match(/(\d+\s*(?:second|minute|hour|day|week|month|year)s?\s*ago)/i);
+          if (dateMatch) metadata.uploadDate = dateMatch[1];
+        }
+      }
+      
       if (!videoId) return null;
       if (!title) title = 'Untitled';
       
-      return { videoId, title, channelName, isShort };
+      return { videoId, title, channelName, isShort, metadata };
     } catch (e) {
       return null;
     }
@@ -355,6 +384,8 @@
       
       if (videos.length > 0 || shorts.length > 0) {
         await log('success', `기본 셀렉터 성공`, { videos: videos.length, shorts: shorts.length });
+        // Cache successful default selectors
+        await cacheSelectors(pageType, defaultSels);
       }
     }
     
