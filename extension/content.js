@@ -16,23 +16,30 @@
   const DEFAULT_SELECTORS = {
     video_title: {
       watch: 'h1.ytd-watch-metadata yt-formatted-string, h1 yt-formatted-string',
-      home: '#video-title, a#video-title-link',
+      home: '#video-title, a#video-title-link, #video-title-link yt-formatted-string',
       default: '#video-title'
     },
     channel_name: {
       watch: '#owner #channel-name a, ytd-channel-name a',
-      home: '#channel-name a, ytd-channel-name a',
+      home: '#channel-name a, ytd-channel-name a, #text-container yt-formatted-string a',
       default: '#channel-name a'
     },
     video_link: {
-      home: 'a#thumbnail, a.ytd-thumbnail',
+      home: 'a#thumbnail, a.ytd-thumbnail, ytd-thumbnail a',
       default: 'a#thumbnail'
     },
     video_container: {
-      home: 'ytd-rich-item-renderer, ytd-video-renderer',
-      subscriptions: 'ytd-grid-video-renderer, ytd-rich-item-renderer',
+      // Regular videos use ytd-rich-item-renderer with ytd-rich-grid-media inside
+      // Shorts use ytd-rich-item-renderer with ytd-rich-grid-slim-media or ytd-reel-item-renderer
+      home: 'ytd-rich-item-renderer:has(ytd-rich-grid-media), ytd-rich-item-renderer:has(#dismissible #details), ytd-video-renderer',
+      subscriptions: 'ytd-grid-video-renderer, ytd-rich-item-renderer:has(ytd-rich-grid-media), ytd-video-renderer',
       history: 'ytd-video-renderer',
       default: 'ytd-video-renderer'
+    },
+    // Shorts-specific selector (for explicit shorts collection if needed)
+    shorts_container: {
+      home: 'ytd-rich-item-renderer:has(ytd-rich-grid-slim-media), ytd-reel-item-renderer',
+      default: 'ytd-reel-item-renderer'
     },
     sidebar_recommendations: {
       watch: 'ytd-compact-video-renderer',
@@ -418,31 +425,65 @@
     const videos = [];
     const pageType = 'home';
     
-    const containerSelector = await getSelector('video_container', pageType);
-    const videoEls = findElements(containerSelector);
+    // First try the :has() selector for modern browsers
+    let containerSelector = await getSelector('video_container', pageType);
+    let videoEls = findElements(containerSelector);
+    
+    // Fallback: if :has() doesn't work, get all rich-item-renderers and filter manually
+    if (videoEls.length === 0) {
+      console.log('[EchoBreaker] :has() selector failed, using fallback...');
+      videoEls = Array.from(document.querySelectorAll('ytd-rich-item-renderer, ytd-video-renderer'));
+    }
+    
     console.log('[EchoBreaker] Found home page video elements:', videoEls.length);
 
     for (let i = 0; i < Math.min(videoEls.length, CONFIG.MAX_VIDEOS); i++) {
       const el = videoEls[i];
       try {
-        const titleEl = findElement('#video-title, a#video-title-link', el);
-        const channelEl = findElement('#channel-name a, ytd-channel-name a, #text-container a', el);
-        const linkEl = findElement('a#thumbnail, a.ytd-thumbnail', el);
+        // Skip Shorts - they have ytd-rich-grid-slim-media or shorts in URL
+        const isShorts = el.querySelector('ytd-rich-grid-slim-media') !== null ||
+                         el.querySelector('[is-shorts]') !== null ||
+                         el.querySelector('ytd-reel-item-renderer') !== null;
+        if (isShorts) {
+          continue;
+        }
+        
+        // Also check for shorts shelf containers
+        const closestShelf = el.closest('ytd-rich-shelf-renderer');
+        if (closestShelf && closestShelf.querySelector('[is-shorts]')) {
+          continue;
+        }
+        
+        const titleEl = findElement('#video-title, a#video-title-link, #video-title-link yt-formatted-string, h3 a#video-title', el);
+        const channelEl = findElement('#channel-name a, ytd-channel-name a, #text-container a, #text a', el);
+        const linkEl = findElement('a#thumbnail, a.ytd-thumbnail, ytd-thumbnail a, a[href*="/watch"]', el);
         
         // Extract additional metadata
-        const metadataEl = findElement('#metadata-line, ytd-video-meta-block', el);
-        const viewCountEl = findElement('#metadata-line span:first-child, .inline-metadata-item:first-child', el);
+        const metadataEl = findElement('#metadata-line, ytd-video-meta-block, #metadata', el);
+        const viewCountEl = findElement('#metadata-line span:first-child, .inline-metadata-item:first-child, #metadata-line span', el);
         const uploadTimeEl = findElement('#metadata-line span:last-child, .inline-metadata-item:last-child', el);
-        const durationEl = findElement('ytd-thumbnail-overlay-time-status-renderer span, #overlays span.ytd-thumbnail-overlay-time-status-renderer', el);
+        const durationEl = findElement('ytd-thumbnail-overlay-time-status-renderer span, #overlays span.ytd-thumbnail-overlay-time-status-renderer, span.ytd-thumbnail-overlay-time-status-renderer', el);
         
         // Get channel avatar
-        const avatarEl = findElement('#avatar-link img, yt-img-shadow img', el);
+        const avatarEl = findElement('#avatar-link img, yt-img-shadow img, #avatar img', el);
 
-        if (!titleEl) continue;
+        if (!titleEl) {
+          console.log('[EchoBreaker] No title element found in:', el.tagName, el.id);
+          continue;
+        }
 
         const href = linkEl?.getAttribute('href') || titleEl?.getAttribute('href') || '';
+        
+        // Skip if this is a shorts link
+        if (href.includes('/shorts/')) {
+          continue;
+        }
+        
         const videoId = extractVideoId(href);
-        if (!videoId) continue;
+        if (!videoId) {
+          console.log('[EchoBreaker] No video ID extracted from:', href);
+          continue;
+        }
 
         // Parse view count (e.g., "조회수 123만회" or "1.2M views")
         const viewCountText = viewCountEl?.textContent?.trim() || '';
@@ -463,11 +504,12 @@
           collectedAt: new Date().toISOString()
         });
       } catch (e) {
+        console.log('[EchoBreaker] Error processing video element:', e.message);
         // Skip this video
       }
     }
 
-    console.log('[EchoBreaker] Collected home page videos:', videos.length);
+    console.log('[EchoBreaker] Collected home page videos (excluding shorts):', videos.length);
     return videos;
   }
   
