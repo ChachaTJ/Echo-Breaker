@@ -105,7 +105,19 @@
       }
     });
     
-    observer.observe(document.body, { childList: true, subtree: true });
+    // Wait for document.body to be available
+    if (document.body) {
+      observer.observe(document.body, { childList: true, subtree: true });
+    } else {
+      // If body not ready, wait for it
+      const bodyWaiter = setInterval(() => {
+        if (document.body) {
+          clearInterval(bodyWaiter);
+          observer.observe(document.body, { childList: true, subtree: true });
+          console.log('[EchoBreaker] Body available, observer attached');
+        }
+      }, 100);
+    }
   }
 
   function handleMessage(message, sender, sendResponse) {
