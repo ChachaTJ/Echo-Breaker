@@ -224,12 +224,58 @@
       }
     });
 
-    // Initial data collection
-    console.log('[EchoBreaker] Starting initial data collection in 5s...');
-    setTimeout(() => collectData(), 5000);
-    setTimeout(() => flushPendingData(), 7000);
+    // Initial data collection - wait for page to be ready
+    console.log('[EchoBreaker] Waiting for page content to load...');
+    waitForContent().then(() => {
+      console.log('[EchoBreaker] Content detected, starting collection...');
+      collectData();
+      setTimeout(() => flushPendingData(), 2000);
+    });
     
     observePageChanges();
+  }
+  
+  // Wait for YouTube content to load before collecting
+  function waitForContent(maxWait = 15000) {
+    return new Promise((resolve) => {
+      const startTime = Date.now();
+      
+      function check() {
+        // Check for various content indicators
+        const hasVideoRenderers = document.querySelectorAll('ytd-rich-item-renderer, ytd-video-renderer, ytd-compact-video-renderer').length > 0;
+        const hasVideoTitles = document.querySelectorAll('#video-title').length > 0;
+        const hasThumbnails = document.querySelectorAll('a#thumbnail, ytd-thumbnail').length > 0;
+        const isWatchPage = window.location.href.includes('/watch');
+        const hasWatchContent = isWatchPage && document.querySelector('ytd-watch-metadata, h1.ytd-watch-metadata');
+        
+        console.log('[EchoBreaker] Content check:', {
+          hasVideoRenderers,
+          hasVideoTitles,
+          hasThumbnails,
+          isWatchPage,
+          hasWatchContent,
+          elapsed: Date.now() - startTime
+        });
+        
+        if (hasVideoRenderers || hasVideoTitles || hasThumbnails || hasWatchContent) {
+          console.log('[EchoBreaker] Content found after', Date.now() - startTime, 'ms');
+          resolve(true);
+          return;
+        }
+        
+        if (Date.now() - startTime >= maxWait) {
+          console.log('[EchoBreaker] Max wait reached, proceeding anyway');
+          resolve(false);
+          return;
+        }
+        
+        // Check again after 500ms
+        setTimeout(check, 500);
+      }
+      
+      // Start checking after a short initial delay
+      setTimeout(check, 1000);
+    });
   }
   
   function observePageChanges() {
@@ -238,8 +284,8 @@
     const observer = new MutationObserver(() => {
       if (window.location.href !== lastUrl) {
         lastUrl = window.location.href;
-        console.log('[EchoBreaker] Page changed, collecting data...');
-        setTimeout(() => collectData(), 3000);
+        console.log('[EchoBreaker] Page changed, waiting for content...');
+        waitForContent().then(() => collectData());
       }
     });
     
@@ -475,7 +521,13 @@
     isCollecting = true;
 
     const pageType = detectPageType();
-    console.log('[EchoBreaker] Starting data collection on page type:', pageType);
+    console.log('[EchoBreaker] ========== DATA COLLECTION START ==========');
+    console.log('[EchoBreaker] Page type:', pageType);
+    console.log('[EchoBreaker] URL:', window.location.href);
+    console.log('[EchoBreaker] Document state:', document.readyState);
+    
+    // Reset debug counter
+    window._ebDebugCount = 0;
     
     // Show visual indicator
     createCrawlIndicator();
@@ -635,9 +687,18 @@
     const stored = await chrome.storage.local.get(['collectShorts']);
     const collectShortsEnabled = stored.collectShorts !== false;
     
-    // Get all content items from home page
+    // Get all content items from home page - Try multiple selectors
     let allEls = Array.from(document.querySelectorAll('ytd-rich-item-renderer, ytd-video-renderer, ytd-reel-item-renderer'));
     
+    // Debug: Log DOM structure to understand what's available
+    console.log('[EchoBreaker] === HOME PAGE DEBUG ===');
+    console.log('[EchoBreaker] URL:', window.location.href);
+    console.log('[EchoBreaker] Found ytd-rich-item-renderer:', document.querySelectorAll('ytd-rich-item-renderer').length);
+    console.log('[EchoBreaker] Found ytd-video-renderer:', document.querySelectorAll('ytd-video-renderer').length);
+    console.log('[EchoBreaker] Found ytd-rich-grid-media:', document.querySelectorAll('ytd-rich-grid-media').length);
+    console.log('[EchoBreaker] Found #video-title elements:', document.querySelectorAll('#video-title').length);
+    console.log('[EchoBreaker] Found a#thumbnail:', document.querySelectorAll('a#thumbnail').length);
+    console.log('[EchoBreaker] Document ready state:', document.readyState);
     console.log('[EchoBreaker] Found home page content elements:', allEls.length);
 
     for (let i = 0; i < Math.min(allEls.length, CONFIG.MAX_VIDEOS * 2); i++) {
@@ -718,6 +779,21 @@
       
       // Get channel avatar
       const avatarEl = findElement('#avatar-link img, yt-img-shadow img, #avatar img', el);
+
+      // Debug logging for first few elements
+      if (!window._ebDebugCount) window._ebDebugCount = 0;
+      if (window._ebDebugCount < 3) {
+        console.log('[EchoBreaker] Element extraction debug:', {
+          tagName: el.tagName,
+          hasTitle: !!titleEl,
+          titleText: titleEl?.textContent?.substring(0, 30),
+          hasChannel: !!channelEl,
+          hasLink: !!linkEl,
+          linkHref: linkEl?.getAttribute('href')?.substring(0, 50),
+          innerHTML: el.innerHTML?.substring(0, 200)
+        });
+        window._ebDebugCount++;
+      }
 
       if (!titleEl) return null;
 
@@ -809,6 +885,12 @@
     
     const containerSelector = await getSelector('sidebar_recommendations', pageType);
     const videoEls = findElements(containerSelector);
+    
+    // Debug: Check sidebar DOM
+    console.log('[EchoBreaker] === SIDEBAR DEBUG ===');
+    console.log('[EchoBreaker] Container selector:', containerSelector);
+    console.log('[EchoBreaker] Found ytd-compact-video-renderer:', document.querySelectorAll('ytd-compact-video-renderer').length);
+    console.log('[EchoBreaker] Found ytd-watch-next-secondary-results-renderer:', document.querySelectorAll('ytd-watch-next-secondary-results-renderer').length);
     console.log('[EchoBreaker] Found sidebar recommendations:', videoEls.length);
 
     for (let i = 0; i < Math.min(videoEls.length, 20); i++) {
