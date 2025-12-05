@@ -12,6 +12,27 @@ import {
 import OpenAI from "openai";
 import { GoogleGenAI } from "@google/genai";
 
+// App version
+const APP_VERSION = "1.0.0";
+
+// Extension connection tracking
+interface ExtensionConnection {
+  lastSeen: Date;
+  version: string;
+  userAgent: string;
+}
+let extensionConnection: ExtensionConnection | null = null;
+
+// Data collection logs
+interface CollectionLog {
+  timestamp: Date;
+  type: 'videos' | 'subscriptions' | 'recommended';
+  count: number;
+  source: string;
+}
+const collectionLogs: CollectionLog[] = [];
+const MAX_COLLECTION_LOGS = 100;
+
 // Initialize OpenAI client with Replit AI Integrations
 let openai: OpenAI | null = null;
 
@@ -81,20 +102,80 @@ export async function registerRoutes(
     }
   });
 
+  // Extension status and version endpoint
+  app.get("/api/extension/status", (req, res) => {
+    const isConnected = extensionConnection && 
+      (Date.now() - extensionConnection.lastSeen.getTime()) < 5 * 60 * 1000; // 5 minutes
+    
+    res.json({
+      appVersion: APP_VERSION,
+      extensionConnected: isConnected,
+      extensionVersion: extensionConnection?.version || null,
+      lastSeen: extensionConnection?.lastSeen || null,
+      userAgent: extensionConnection?.userAgent || null,
+    });
+  });
+
+  // Extension heartbeat/ping endpoint
+  app.post("/api/extension/ping", (req, res) => {
+    const { version } = req.body;
+    extensionConnection = {
+      lastSeen: new Date(),
+      version: version || 'unknown',
+      userAgent: req.headers['user-agent'] || 'unknown',
+    };
+    res.json({ success: true, appVersion: APP_VERSION });
+  });
+
+  // Data collection logs endpoint
+  app.get("/api/collection/logs", (req, res) => {
+    res.json({
+      logs: collectionLogs.slice(-50), // Last 50 logs
+      totalCollected: {
+        videos: collectionLogs.filter(l => l.type === 'videos').reduce((sum, l) => sum + l.count, 0),
+        subscriptions: collectionLogs.filter(l => l.type === 'subscriptions').reduce((sum, l) => sum + l.count, 0),
+        recommended: collectionLogs.filter(l => l.type === 'recommended').reduce((sum, l) => sum + l.count, 0),
+      }
+    });
+  });
+
   // Bulk crawl data endpoint (for Chrome extension)
   app.post("/api/crawl", async (req, res) => {
     try {
       const data = req.body as CrawlDataPayload;
       let results = { videos: 0, subscriptions: 0, recommended: 0 };
       
+      // Update extension connection status
+      extensionConnection = {
+        lastSeen: new Date(),
+        version: (data as any).extensionVersion || extensionConnection?.version || 'unknown',
+        userAgent: req.headers['user-agent'] || 'unknown',
+      };
+      
       if (data.videos && data.videos.length > 0) {
         await storage.createVideos(data.videos);
         results.videos = data.videos.length;
+        
+        // Log collection
+        collectionLogs.push({
+          timestamp: new Date(),
+          type: 'videos',
+          count: data.videos.length,
+          source: 'extension',
+        });
       }
       
       if (data.subscriptions && data.subscriptions.length > 0) {
         await storage.createSubscriptions(data.subscriptions);
         results.subscriptions = data.subscriptions.length;
+        
+        // Log collection
+        collectionLogs.push({
+          timestamp: new Date(),
+          type: 'subscriptions',
+          count: data.subscriptions.length,
+          source: 'extension',
+        });
       }
       
       if (data.recommendedVideos && data.recommendedVideos.length > 0) {
@@ -102,6 +183,19 @@ export async function registerRoutes(
         // (These are what YouTube is suggesting - important for detecting echo chamber)
         await storage.createVideos(data.recommendedVideos);
         results.recommended = data.recommendedVideos.length;
+        
+        // Log collection
+        collectionLogs.push({
+          timestamp: new Date(),
+          type: 'recommended',
+          count: data.recommendedVideos.length,
+          source: 'extension',
+        });
+      }
+      
+      // Trim logs if exceeds max
+      while (collectionLogs.length > MAX_COLLECTION_LOGS) {
+        collectionLogs.shift();
       }
       
       res.json({ 
