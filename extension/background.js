@@ -10,7 +10,11 @@ const DEFAULT_SETTINGS = {
   autoSync: true,
   syncInterval: 15,
   lastSync: null,
-  totalVideosCollected: 0
+  totalVideosCollected: 0,
+  // Feature toggles
+  enableRecCards: true,
+  enableStanceOverlays: true,
+  collectShorts: true
 };
 
 // Initialize on install

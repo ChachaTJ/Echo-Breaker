@@ -36,6 +36,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   const testConnectionBtn = document.getElementById('test-connection-btn');
   const saveSuccess = document.getElementById('save-success');
   
+  // Feature toggles
+  const recCardsToggle = document.getElementById('rec-cards-toggle');
+  const stanceOverlaysToggle = document.getElementById('stance-overlays-toggle');
+  const collectShortsToggle = document.getElementById('collect-shorts-toggle');
+  
   // DOM Status elements
   const domStatus = document.getElementById('dom-status');
   const domStatusTitle = document.getElementById('dom-status-title');
@@ -55,6 +60,25 @@ document.addEventListener('DOMContentLoaded', async () => {
       autoSyncToggle.classList.add('active');
     } else {
       autoSyncToggle.classList.remove('active');
+    }
+    
+    // Load feature toggles
+    if (settings.enableRecCards !== false) {
+      recCardsToggle.classList.add('active');
+    } else {
+      recCardsToggle.classList.remove('active');
+    }
+    
+    if (settings.enableStanceOverlays !== false) {
+      stanceOverlaysToggle.classList.add('active');
+    } else {
+      stanceOverlaysToggle.classList.remove('active');
+    }
+    
+    if (settings.collectShorts !== false) {
+      collectShortsToggle.classList.add('active');
+    } else {
+      collectShortsToggle.classList.remove('active');
     }
 
     if (settings.lastSync) {
@@ -160,16 +184,31 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   });
 
-  // Auto-sync toggle
+  // Toggle click handlers
   autoSyncToggle.addEventListener('click', () => {
     autoSyncToggle.classList.toggle('active');
+  });
+  
+  recCardsToggle.addEventListener('click', () => {
+    recCardsToggle.classList.toggle('active');
+  });
+  
+  stanceOverlaysToggle.addEventListener('click', () => {
+    stanceOverlaysToggle.classList.toggle('active');
+  });
+  
+  collectShortsToggle.addEventListener('click', () => {
+    collectShortsToggle.classList.toggle('active');
   });
 
   // Save settings
   saveSettingsBtn.addEventListener('click', async () => {
     const newSettings = {
       apiUrl: apiUrlInput.value.trim() || DEFAULT_API_URL,
-      autoSync: autoSyncToggle.classList.contains('active')
+      autoSync: autoSyncToggle.classList.contains('active'),
+      enableRecCards: recCardsToggle.classList.contains('active'),
+      enableStanceOverlays: stanceOverlaysToggle.classList.contains('active'),
+      collectShorts: collectShortsToggle.classList.contains('active')
     };
 
     try {

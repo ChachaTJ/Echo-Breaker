@@ -485,6 +485,10 @@
     const shorts = [];
     const pageType = 'home';
     
+    // Check if shorts collection is enabled
+    const stored = await chrome.storage.local.get(['collectShorts']);
+    const collectShortsEnabled = stored.collectShorts !== false;
+    
     // Get all content items from home page
     let allEls = Array.from(document.querySelectorAll('ytd-rich-item-renderer, ytd-video-renderer, ytd-reel-item-renderer'));
     
@@ -503,10 +507,12 @@
         const isInShortsShelf = closestShelf && closestShelf.querySelector('[is-shorts]');
         
         if (isShorts || isInShortsShelf) {
-          // Collect as Short
-          const shortData = await extractShortFromElement(el);
-          if (shortData) {
-            shorts.push(shortData);
+          // Only collect shorts if enabled
+          if (collectShortsEnabled) {
+            const shortData = await extractShortFromElement(el);
+            if (shortData) {
+              shorts.push(shortData);
+            }
           }
         } else {
           // Collect as regular Video
@@ -1126,21 +1132,26 @@
   // Insert AI-recommended videos into YouTube DOM
   // ========================================
 
-  // Inject styles for EchoBreaker recommendation cards
+  // Inject styles for EchoBreaker recommendation cards (YouTube-matching style)
   function injectRecommendationStyles() {
     if (document.getElementById('echobreaker-rec-styles')) return;
     
     const style = document.createElement('style');
     style.id = 'echobreaker-rec-styles';
     style.textContent = `
-      /* EchoBreaker Recommendation Container */
+      /* EchoBreaker Recommendation Container - YouTube style */
       .echobreaker-rec-container {
-        margin: 16px 0 !important;
-        padding: 16px !important;
-        background: linear-gradient(135deg, rgba(34, 197, 94, 0.1), rgba(59, 130, 246, 0.1)) !important;
-        border: 2px solid #22c55e !important;
+        margin: 0 0 16px 0 !important;
+        padding: 12px !important;
+        background: var(--yt-spec-badge-chip-background, rgba(0, 0, 0, 0.05)) !important;
+        border: 1px solid #22c55e !important;
         border-radius: 12px !important;
         position: relative !important;
+      }
+      
+      html[dark] .echobreaker-rec-container,
+      [dark] .echobreaker-rec-container {
+        background: rgba(34, 197, 94, 0.08) !important;
       }
       
       .echobreaker-rec-header {
@@ -1149,114 +1160,135 @@
         gap: 8px !important;
         margin-bottom: 12px !important;
         padding-bottom: 8px !important;
-        border-bottom: 1px solid rgba(34, 197, 94, 0.3) !important;
+        border-bottom: 1px solid rgba(34, 197, 94, 0.2) !important;
       }
       
       .echobreaker-rec-logo {
-        width: 24px !important;
-        height: 24px !important;
-        background: linear-gradient(135deg, #22c55e, #3b82f6) !important;
-        border-radius: 50% !important;
+        width: 20px !important;
+        height: 20px !important;
+        background: linear-gradient(135deg, #22c55e, #16a34a) !important;
+        border-radius: 4px !important;
         display: flex !important;
         align-items: center !important;
         justify-content: center !important;
         color: white !important;
         font-weight: bold !important;
-        font-size: 14px !important;
+        font-size: 11px !important;
       }
       
       .echobreaker-rec-title {
-        font-size: 14px !important;
-        font-weight: 600 !important;
+        font-size: 13px !important;
+        font-weight: 500 !important;
         color: #22c55e !important;
+        font-family: "Roboto", "Arial", sans-serif !important;
       }
       
       .echobreaker-rec-subtitle {
         font-size: 11px !important;
-        color: var(--yt-spec-text-secondary, #aaa) !important;
+        color: var(--yt-spec-text-secondary, #606060) !important;
         margin-left: auto !important;
+        font-family: "Roboto", "Arial", sans-serif !important;
       }
       
-      /* Video Card */
+      /* Video Card - Match YouTube's compact video renderer exactly */
       .echobreaker-video-card {
         display: flex !important;
-        gap: 12px !important;
-        padding: 12px !important;
-        background: var(--yt-spec-badge-chip-background, rgba(255,255,255,0.1)) !important;
-        border-radius: 8px !important;
+        gap: 8px !important;
+        padding: 0 !important;
         margin-bottom: 8px !important;
         cursor: pointer !important;
-        transition: all 0.2s ease !important;
         text-decoration: none !important;
+        border-radius: 8px !important;
+        overflow: hidden !important;
       }
       
-      .echobreaker-video-card:hover {
-        background: var(--yt-spec-10-percent-layer, rgba(255,255,255,0.15)) !important;
-        transform: translateX(4px) !important;
+      .echobreaker-video-card:hover .echobreaker-video-title {
+        color: var(--yt-spec-text-primary, #0f0f0f) !important;
       }
       
       .echobreaker-video-card:last-child {
         margin-bottom: 0 !important;
       }
       
+      /* Thumbnail - YouTube uses 168x94 for sidebar (16:9 ratio) */
+      .echobreaker-video-thumbnail-wrapper {
+        position: relative !important;
+        flex-shrink: 0 !important;
+        width: 168px !important;
+        height: 94px !important;
+        border-radius: 8px !important;
+        overflow: hidden !important;
+        background: #000 !important;
+      }
+      
       .echobreaker-video-thumbnail {
-        width: 120px !important;
-        min-width: 120px !important;
-        height: 68px !important;
-        border-radius: 6px !important;
+        width: 100% !important;
+        height: 100% !important;
         object-fit: cover !important;
-        background: #333 !important;
+      }
+      
+      .echobreaker-safe-badge-overlay {
+        position: absolute !important;
+        bottom: 4px !important;
+        right: 4px !important;
+        display: flex !important;
+        align-items: center !important;
+        gap: 2px !important;
+        font-size: 10px !important;
+        background: rgba(34, 197, 94, 0.9) !important;
+        color: white !important;
+        padding: 2px 4px !important;
+        border-radius: 2px !important;
+        font-family: "Roboto", "Arial", sans-serif !important;
+        font-weight: 500 !important;
       }
       
       .echobreaker-video-info {
         flex: 1 !important;
         min-width: 0 !important;
+        padding: 0 8px 0 0 !important;
       }
       
       .echobreaker-video-title {
-        font-size: 13px !important;
+        font-size: 14px !important;
         font-weight: 500 !important;
-        color: var(--yt-spec-text-primary, #fff) !important;
-        line-height: 1.3 !important;
+        color: var(--yt-spec-text-primary, #0f0f0f) !important;
+        line-height: 20px !important;
         margin-bottom: 4px !important;
         display: -webkit-box !important;
         -webkit-line-clamp: 2 !important;
         -webkit-box-orient: vertical !important;
         overflow: hidden !important;
+        font-family: "Roboto", "Arial", sans-serif !important;
+      }
+      
+      html[dark] .echobreaker-video-title,
+      [dark] .echobreaker-video-title {
+        color: var(--yt-spec-text-primary, #f1f1f1) !important;
       }
       
       .echobreaker-video-channel {
-        font-size: 11px !important;
-        color: var(--yt-spec-text-secondary, #aaa) !important;
+        font-size: 12px !important;
+        color: var(--yt-spec-text-secondary, #606060) !important;
         margin-bottom: 4px !important;
+        font-family: "Roboto", "Arial", sans-serif !important;
+        line-height: 18px !important;
+      }
+      
+      html[dark] .echobreaker-video-channel,
+      [dark] .echobreaker-video-channel {
+        color: var(--yt-spec-text-secondary, #aaa) !important;
       }
       
       .echobreaker-video-reason {
-        font-size: 10px !important;
+        font-size: 11px !important;
         color: #22c55e !important;
-        font-style: italic !important;
         display: -webkit-box !important;
         -webkit-line-clamp: 2 !important;
         -webkit-box-orient: vertical !important;
         overflow: hidden !important;
-      }
-      
-      .echobreaker-safe-badge {
-        display: inline-flex !important;
-        align-items: center !important;
-        gap: 4px !important;
-        font-size: 9px !important;
-        background: rgba(34, 197, 94, 0.2) !important;
-        color: #22c55e !important;
-        padding: 2px 6px !important;
-        border-radius: 4px !important;
-        margin-top: 4px !important;
-      }
-      
-      /* Dark mode adjustments */
-      html[dark] .echobreaker-rec-container,
-      [dark] .echobreaker-rec-container {
-        background: linear-gradient(135deg, rgba(34, 197, 94, 0.15), rgba(59, 130, 246, 0.15)) !important;
+        font-family: "Roboto", "Arial", sans-serif !important;
+        line-height: 16px !important;
       }
     `;
     document.head.appendChild(style);
@@ -1291,7 +1323,7 @@
     return { recommendations: [] };
   }
 
-  // Create recommendation card HTML
+  // Create recommendation card HTML (YouTube compact-video-renderer style)
   function createRecommendationCard(rec) {
     const card = document.createElement('a');
     card.className = 'echobreaker-video-card';
@@ -1300,18 +1332,20 @@
     card.rel = 'noopener noreferrer';
     card.dataset.videoId = rec.videoId;
     
+    // Use maxresdefault for better quality, fallback to mqdefault
+    const thumbnailUrl = `https://img.youtube.com/vi/${rec.videoId}/mqdefault.jpg`;
+    
     card.innerHTML = `
-      <img class="echobreaker-video-thumbnail" 
-           src="${rec.thumbnailUrl}" 
-           alt="${rec.title}"
-           onerror="this.src='https://img.youtube.com/vi/${rec.videoId}/mqdefault.jpg'">
+      <div class="echobreaker-video-thumbnail-wrapper">
+        <img class="echobreaker-video-thumbnail" 
+             src="${thumbnailUrl}" 
+             alt="${rec.title}">
+        <div class="echobreaker-safe-badge-overlay">Safe</div>
+      </div>
       <div class="echobreaker-video-info">
         <div class="echobreaker-video-title">${rec.title}</div>
         <div class="echobreaker-video-channel">${rec.channelName}</div>
         <div class="echobreaker-video-reason">${rec.reason}</div>
-        <div class="echobreaker-safe-badge">
-          <span>&#128274;</span> Algorithm-safe viewing
-        </div>
       </div>
     `;
     
@@ -1348,50 +1382,55 @@
     return container;
   }
 
-  // Find best insertion point in YouTube DOM
+  // Find best insertion point in YouTube DOM (returns only ONE point to prevent duplicates)
   function findInsertionPoint() {
-    // Try sidebar (watch page) - multiple selectors for different YouTube layouts
-    const sidebarSelectors = [
-      '#secondary-inner #related',
-      '#secondary #related',
-      '#related',
-      'ytd-watch-next-secondary-results-renderer'
-    ];
+    const url = location.href;
     
-    for (const selector of sidebarSelectors) {
-      const element = document.querySelector(selector);
-      if (element && element.offsetParent !== null) {
-        console.log('[EchoBreaker] Found sidebar insertion point:', selector);
-        return { element, position: 'prepend' };
+    // Watch page - use sidebar
+    if (url.includes('/watch')) {
+      const sidebarSelectors = [
+        '#secondary-inner ytd-watch-next-secondary-results-renderer #items',
+        '#secondary ytd-watch-next-secondary-results-renderer #items',
+        '#related #items',
+        'ytd-watch-next-secondary-results-renderer #items'
+      ];
+      
+      for (const selector of sidebarSelectors) {
+        const element = document.querySelector(selector);
+        if (element && element.offsetParent !== null) {
+          console.log('[EchoBreaker] Found watch sidebar:', selector);
+          return { element, position: 'prepend', type: 'watch' };
+        }
       }
     }
     
-    // Try home page content
-    const homeSelectors = [
-      'ytd-rich-grid-renderer #contents',
-      'ytd-two-column-browse-results-renderer #primary #contents',
-      '#page-manager ytd-browse #contents'
-    ];
-    
-    for (const selector of homeSelectors) {
-      const element = document.querySelector(selector);
-      if (element && element.offsetParent !== null) {
-        console.log('[EchoBreaker] Found home insertion point:', selector);
-        return { element, position: 'prepend' };
+    // Home page - use the main grid
+    if (url === 'https://www.youtube.com/' || url.includes('youtube.com/?')) {
+      const homeSelectors = [
+        'ytd-rich-grid-renderer #contents'
+      ];
+      
+      for (const selector of homeSelectors) {
+        const element = document.querySelector(selector);
+        if (element && element.offsetParent !== null && element.children.length > 0) {
+          console.log('[EchoBreaker] Found home grid:', selector);
+          return { element, position: 'prepend', type: 'home' };
+        }
       }
     }
     
-    // Try search results
-    const searchSelectors = [
-      'ytd-section-list-renderer #contents',
-      'ytd-search #contents'
-    ];
-    
-    for (const selector of searchSelectors) {
-      const element = document.querySelector(selector);
-      if (element && element.offsetParent !== null) {
-        console.log('[EchoBreaker] Found search insertion point:', selector);
-        return { element, position: 'prepend' };
+    // Search results page
+    if (url.includes('/results')) {
+      const searchSelectors = [
+        'ytd-section-list-renderer #contents'
+      ];
+      
+      for (const selector of searchSelectors) {
+        const element = document.querySelector(selector);
+        if (element && element.offsetParent !== null) {
+          console.log('[EchoBreaker] Found search results:', selector);
+          return { element, position: 'prepend', type: 'search' };
+        }
       }
     }
     
@@ -1453,25 +1492,31 @@
   }
 
   // Watch for page navigation to inject recommendations
+  let recInjectionInProgress = false;
+  
   function observeForRecommendationInjection() {
-    // Initial injection - try immediately and retry
     console.log('[EchoBreaker] Starting recommendation injection observer');
     
-    // Try multiple times with increasing delays
-    const tryInject = async (delay) => {
-      await new Promise(resolve => setTimeout(resolve, delay));
-      const success = await injectDiverseRecommendations();
-      return success;
+    // Single injection attempt with lock to prevent duplicates
+    const tryInject = async () => {
+      if (recInjectionInProgress) return;
+      if (document.getElementById('echobreaker-diverse-recs')) return;
+      
+      recInjectionInProgress = true;
+      try {
+        await injectDiverseRecommendations();
+      } finally {
+        recInjectionInProgress = false;
+      }
     };
     
-    // Attempt injection at different intervals
-    tryInject(1000);
-    tryInject(3000);
-    tryInject(6000);
+    // Single initial attempt after page loads
+    setTimeout(tryInject, 2000);
     
     // Watch for YouTube SPA navigation
     let lastUrl = location.href;
-    const navObserver = new MutationObserver((mutations) => {
+    
+    const checkUrlChange = () => {
       if (location.href !== lastUrl) {
         lastUrl = location.href;
         console.log('[EchoBreaker] URL changed, reinitializing recommendations');
@@ -1484,42 +1529,83 @@
         
         // Reset injection attempts
         injectionAttempts = 0;
+        recInjectionInProgress = false;
         
-        // Re-inject after navigation with delays
-        tryInject(1500);
-        tryInject(4000);
-      }
-    });
-    
-    // Start observing
-    const startObserving = () => {
-      if (document.body) {
-        navObserver.observe(document.body, { childList: true, subtree: true });
-        console.log('[EchoBreaker] Navigation observer started');
-      } else {
-        setTimeout(startObserving, 500);
+        // Re-inject after navigation
+        setTimeout(tryInject, 2000);
       }
     };
-    startObserving();
+    
+    // Use popstate and yt-navigate-finish for SPA navigation
+    window.addEventListener('popstate', checkUrlChange);
+    window.addEventListener('yt-navigate-finish', checkUrlChange);
+    
+    // Also observe body for mutations that might indicate page change
+    const navObserver = new MutationObserver(() => {
+      checkUrlChange();
+    });
+    
+    if (document.body) {
+      navObserver.observe(document.body, { childList: true, subtree: false });
+    }
   }
 
   // Initialize recommendation injection
-  function initRecommendations() {
+  async function initRecommendations() {
+    // Check if feature is enabled
+    const stored = await chrome.storage.local.get(['enableRecCards']);
+    if (stored.enableRecCards === false) {
+      console.log('[EchoBreaker] AI recommendation cards disabled');
+      return;
+    }
     console.log('[EchoBreaker] Initializing AI recommendation injection system');
     injectRecommendationStyles();
     observeForRecommendationInjection();
   }
 
+  // Initialize overlays with settings check
+  async function initOverlaysWithSettings() {
+    const stored = await chrome.storage.local.get(['enableStanceOverlays']);
+    if (stored.enableStanceOverlays === false) {
+      console.log('[EchoBreaker] Stance overlays disabled');
+      return;
+    }
+    initOverlays();
+  }
+  
+  // Listen for settings changes
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === 'local') {
+      if (changes.enableRecCards) {
+        if (changes.enableRecCards.newValue === false) {
+          // Remove existing recommendations
+          const existing = document.getElementById('echobreaker-diverse-recs');
+          if (existing) existing.remove();
+        } else {
+          initRecommendations();
+        }
+      }
+      if (changes.enableStanceOverlays) {
+        if (changes.enableStanceOverlays.newValue === false) {
+          // Remove existing overlays
+          document.querySelectorAll('.echobreaker-stance-overlay').forEach(el => el.remove());
+        } else {
+          initOverlaysWithSettings();
+        }
+      }
+    }
+  });
+
   // Start
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', () => {
       init();
-      setTimeout(initOverlays, 2000);
+      setTimeout(initOverlaysWithSettings, 2000);
       setTimeout(initRecommendations, 3000);
     });
   } else {
     init();
-    setTimeout(initOverlays, 2000);
+    setTimeout(initOverlaysWithSettings, 2000);
     setTimeout(initRecommendations, 3000);
   }
 })();
