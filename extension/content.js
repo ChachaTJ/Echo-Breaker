@@ -56,6 +56,137 @@
   let syncIntervalId = null;
   let cachedSelectors = {};
   let selectorFailures = {};
+  
+  // =============================================
+  // Visual Feedback System
+  // =============================================
+  
+  function createCrawlIndicator() {
+    // Remove existing indicator if any
+    const existing = document.getElementById('echobreaker-crawl-indicator');
+    if (existing) existing.remove();
+    
+    const indicator = document.createElement('div');
+    indicator.id = 'echobreaker-crawl-indicator';
+    indicator.innerHTML = `
+      <style>
+        #echobreaker-crawl-indicator {
+          position: fixed;
+          bottom: 20px;
+          right: 20px;
+          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+          color: white;
+          padding: 12px 20px;
+          border-radius: 12px;
+          font-family: 'YouTube Sans', 'Roboto', sans-serif;
+          font-size: 13px;
+          font-weight: 500;
+          z-index: 9999999;
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          box-shadow: 0 4px 20px rgba(102, 126, 234, 0.4);
+          animation: echobreaker-slide-in 0.3s ease-out;
+          opacity: 0.95;
+        }
+        @keyframes echobreaker-slide-in {
+          from { transform: translateX(100px); opacity: 0; }
+          to { transform: translateX(0); opacity: 0.95; }
+        }
+        @keyframes echobreaker-slide-out {
+          from { transform: translateX(0); opacity: 0.95; }
+          to { transform: translateX(100px); opacity: 0; }
+        }
+        @keyframes echobreaker-pulse {
+          0%, 100% { transform: scale(1); opacity: 1; }
+          50% { transform: scale(1.2); opacity: 0.7; }
+        }
+        #echobreaker-crawl-indicator .eb-icon {
+          width: 20px;
+          height: 20px;
+          animation: echobreaker-pulse 1.5s infinite;
+        }
+        #echobreaker-crawl-indicator .eb-text {
+          display: flex;
+          flex-direction: column;
+          gap: 2px;
+        }
+        #echobreaker-crawl-indicator .eb-title {
+          font-weight: 600;
+        }
+        #echobreaker-crawl-indicator .eb-count {
+          font-size: 11px;
+          opacity: 0.9;
+        }
+        #echobreaker-crawl-indicator.success {
+          background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+        }
+        #echobreaker-crawl-indicator.error {
+          background: linear-gradient(135deg, #eb3349 0%, #f45c43 100%);
+        }
+      </style>
+      <svg class="eb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="12" cy="12" r="10"/>
+        <path d="M12 6v6l4 2"/>
+      </svg>
+      <div class="eb-text">
+        <span class="eb-title">EchoBreaker 수집 중...</span>
+        <span class="eb-count" id="eb-count-text">데이터 분석 중</span>
+      </div>
+    `;
+    document.body.appendChild(indicator);
+    return indicator;
+  }
+  
+  function updateCrawlIndicator(status, data = {}) {
+    const indicator = document.getElementById('echobreaker-crawl-indicator');
+    if (!indicator) return;
+    
+    const countText = indicator.querySelector('#eb-count-text');
+    const titleText = indicator.querySelector('.eb-title');
+    
+    if (status === 'collecting') {
+      titleText.textContent = 'EchoBreaker 수집 중...';
+      countText.textContent = '페이지 분석 중';
+    } else if (status === 'success') {
+      indicator.classList.add('success');
+      titleText.textContent = 'EchoBreaker 수집 완료!';
+      const total = (data.videos || 0) + (data.shorts || 0) + (data.recommended || 0);
+      countText.textContent = `동영상 ${data.videos || 0}개, 추천 ${data.recommended || 0}개 수집`;
+      
+      // Remove after 3 seconds with animation
+      setTimeout(() => {
+        indicator.style.animation = 'echobreaker-slide-out 0.3s ease-in forwards';
+        setTimeout(() => indicator.remove(), 300);
+      }, 3000);
+    } else if (status === 'error') {
+      indicator.classList.add('error');
+      titleText.textContent = 'EchoBreaker 수집 실패';
+      countText.textContent = data.message || '서버 연결 오류';
+      
+      setTimeout(() => {
+        indicator.style.animation = 'echobreaker-slide-out 0.3s ease-in forwards';
+        setTimeout(() => indicator.remove(), 300);
+      }, 4000);
+    } else if (status === 'nodata') {
+      indicator.classList.add('error');
+      titleText.textContent = 'EchoBreaker';
+      countText.textContent = '수집할 데이터 없음';
+      
+      setTimeout(() => {
+        indicator.style.animation = 'echobreaker-slide-out 0.3s ease-in forwards';
+        setTimeout(() => indicator.remove(), 300);
+      }, 2000);
+    }
+  }
+  
+  function removeCrawlIndicator() {
+    const indicator = document.getElementById('echobreaker-crawl-indicator');
+    if (indicator) {
+      indicator.style.animation = 'echobreaker-slide-out 0.3s ease-in forwards';
+      setTimeout(() => indicator.remove(), 300);
+    }
+  }
 
   // Initialize
   async function init() {
@@ -345,6 +476,10 @@
 
     const pageType = detectPageType();
     console.log('[EchoBreaker] Starting data collection on page type:', pageType);
+    
+    // Show visual indicator
+    createCrawlIndicator();
+    updateCrawlIndicator('collecting');
 
     try {
       const data = {
@@ -393,6 +528,12 @@
         const success = await sendToServer(data);
         if (success) {
           lastSync = Date.now();
+          // Update visual indicator with success
+          updateCrawlIndicator('success', {
+            videos: data.videos.length,
+            shorts: data.shorts.length,
+            recommended: data.recommendedVideos.length
+          });
           chrome.runtime.sendMessage({ 
             type: 'SYNC_COMPLETE', 
             data: {
@@ -402,11 +543,16 @@
               subscriptionsCount: data.subscriptions.length
             }
           }).catch(() => {});
+        } else {
+          updateCrawlIndicator('error', { message: '서버 전송 실패' });
         }
+      } else {
+        updateCrawlIndicator('nodata');
       }
 
     } catch (error) {
       console.error('[EchoBreaker] Collection error:', error);
+      updateCrawlIndicator('error', { message: error.message });
     } finally {
       isCollecting = false;
     }

@@ -593,6 +593,15 @@ Focus on high-quality, popular videos from reputable sources that offer balanced
       const data = req.body as CrawlDataPayload & { shorts?: any[] };
       let results = { videos: 0, shorts: 0, subscriptions: 0, recommended: 0 };
       
+      // Log incoming data for debugging
+      console.log(`[Crawl] Received data from extension:`, {
+        videosCount: data.videos?.length || 0,
+        shortsCount: data.shorts?.length || 0,
+        subscriptionsCount: data.subscriptions?.length || 0,
+        recommendedCount: data.recommendedVideos?.length || 0,
+        extensionVersion: (data as any).extensionVersion,
+      });
+      
       // Update extension connection status
       extensionConnection = {
         lastSeen: new Date(),
