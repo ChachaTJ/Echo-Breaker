@@ -12,33 +12,63 @@
     SELECTOR_CACHE_KEY: 'echobreaker_selectors',
   };
 
-  // Default selectors (fallback)
+  // =============================================
+  // yt-dlp Inspired Regex Patterns
+  // Reference: https://github.com/yt-dlp/yt-dlp
+  // =============================================
+  const YT_REGEX = {
+    // Video ID: 11 characters [a-zA-Z0-9_-]
+    VIDEO_ID: /[a-zA-Z0-9_-]{11}/,
+    // Extract video ID from various URL patterns
+    VIDEO_ID_URL: /(?:v=|\/v\/|\/embed\/|\/shorts\/|youtu\.be\/)([a-zA-Z0-9_-]{11})/,
+    // Channel UCID: UC + 22 characters
+    CHANNEL_UCID: /UC[0-9A-Za-z_-]{22}/,
+    // Channel Handle: @username
+    CHANNEL_HANDLE: /@[0-9A-Za-z_]+/,
+    // Playlist ID patterns
+    PLAYLIST_ID: /(?:PL|LL|EC|UU|FL|RD|UL|TL|PU|OLAK5uy_)[0-9A-Za-z_-]{10,}|RDMM|WL|LL|LM/,
+    // View count patterns (1.2M, 123K, 1,234 views)
+    VIEW_COUNT: /([0-9][0-9.,]*[KMB]?)\s*(?:views?|조회|회|視聴)/i,
+    // Upload date patterns (2 days ago, 3주 전, etc.)
+    UPLOAD_DATE: /(\d+)\s*(?:second|minute|hour|day|week|month|year|초|분|시간|일|주|개월|년)s?\s*(?:ago|전)?/i,
+    // Duration patterns (1:23:45, 12:34)
+    DURATION: /(?:(\d+):)?(\d{1,2}):(\d{2})/,
+    // content-id class pattern (YouTube Dec 2024 DOM)
+    CONTENT_ID_CLASS: /content-id-([a-zA-Z0-9_-]{11})/,
+    // Shorts detection patterns
+    SHORTS_URL: /\/shorts\/[a-zA-Z0-9_-]{11}/,
+    SHORTS_CLASS: /shorts|reel|vertical/i,
+  };
+
+  // Default selectors (fallback) - yt-dlp inspired multi-tier approach
   const DEFAULT_SELECTORS = {
     video_title: {
-      watch: 'h1.ytd-watch-metadata yt-formatted-string, h1 yt-formatted-string',
-      home: '#video-title, a#video-title-link, #video-title-link yt-formatted-string',
-      default: '#video-title'
+      watch: 'h1.ytd-watch-metadata yt-formatted-string, h1 yt-formatted-string, #title h1',
+      home: '#video-title, a#video-title-link, h3[title], .yt-core-attributed-string, #video-title-link yt-formatted-string',
+      search: '#video-title, h3.title-and-badge, ytd-video-renderer #video-title',
+      default: '#video-title, h3[title], .yt-core-attributed-string'
     },
     channel_name: {
-      watch: '#owner #channel-name a, ytd-channel-name a',
-      home: '#channel-name a, ytd-channel-name a, #text-container yt-formatted-string a',
-      default: '#channel-name a'
+      watch: '#owner #channel-name a, ytd-channel-name a, #upload-info #channel-name a',
+      home: '#channel-name a, ytd-channel-name a, .yt-lockup-metadata-view-model__subtitle a, #text-container yt-formatted-string a',
+      search: '#channel-name a, ytd-channel-name a, .ytd-channel-name a',
+      default: '#channel-name a, .yt-lockup-metadata-view-model__subtitle a'
     },
     video_link: {
-      home: 'a#thumbnail, a.ytd-thumbnail, ytd-thumbnail a',
-      default: 'a#thumbnail'
+      home: 'a#thumbnail, a.ytd-thumbnail, ytd-thumbnail a, a[href*="/watch?v="], a[href*="/shorts/"]',
+      search: 'a#thumbnail, a.ytd-thumbnail',
+      default: 'a#thumbnail, a[href*="/watch?v="]'
     },
     video_container: {
-      // Regular videos use ytd-rich-item-renderer with ytd-rich-grid-media inside
-      // Shorts use ytd-rich-item-renderer with ytd-rich-grid-slim-media or ytd-reel-item-renderer
-      home: 'ytd-rich-item-renderer:has(ytd-rich-grid-media), ytd-rich-item-renderer:has(#dismissible #details), ytd-video-renderer',
-      subscriptions: 'ytd-grid-video-renderer, ytd-rich-item-renderer:has(ytd-rich-grid-media), ytd-video-renderer',
+      home: 'ytd-rich-item-renderer, ytd-video-renderer, ytd-grid-video-renderer',
+      subscriptions: 'ytd-grid-video-renderer, ytd-rich-item-renderer, ytd-video-renderer',
       history: 'ytd-video-renderer',
-      default: 'ytd-video-renderer'
+      search: 'ytd-video-renderer',
+      default: 'ytd-rich-item-renderer, ytd-video-renderer'
     },
-    // Shorts-specific selector (for explicit shorts collection if needed)
     shorts_container: {
-      home: 'ytd-rich-item-renderer:has(ytd-rich-grid-slim-media), ytd-reel-item-renderer',
+      home: 'ytd-reel-item-renderer, ytd-rich-item-renderer:has([is-shorts])',
+      shorts: 'ytd-reel-video-renderer',
       default: 'ytd-reel-item-renderer'
     },
     sidebar_recommendations: {
@@ -47,6 +77,12 @@
     },
     subscription_channels: {
       default: 'ytd-guide-entry-renderer'
+    },
+    // Metadata selectors (yt-dlp style)
+    metadata: {
+      watch: '#info-container, #info, ytd-video-primary-info-renderer',
+      home: '#metadata, #metadata-line, .yt-lockup-metadata-view-model',
+      default: '#metadata, #metadata-line'
     }
   };
 
@@ -184,122 +220,165 @@
     }
   }
 
-  // Extract data from a card using selectors
+  // Extract data from a card using selectors (yt-dlp inspired approach)
   function extractWithSelectors(card, selectors) {
     try {
       let videoId = null;
       let title = '';
       let channelName = 'Unknown';
+      let channelId = null;
       let isShort = false;
-      let metadata = { viewCount: null, uploadDate: null };
+      let metadata = { viewCount: null, uploadDate: null, duration: null };
       
       const lockupModel = card.querySelector('.yt-lockup-view-model') || card;
       const lockupClasses = lockupModel.className || '';
+      const cardHtml = card.outerHTML || '';
       
-      // === Step 1: Try using provided videoIdSelector (supports href and data attributes) ===
+      // === VIDEO ID EXTRACTION (yt-dlp multi-tier approach) ===
+      
+      // Tier 1: Try provided videoIdSelector
       if (selectors.videoIdSelector && !videoId) {
         const linkEl = card.querySelector(selectors.videoIdSelector);
         if (linkEl) {
-          // Try href first
           const href = linkEl.getAttribute('href') || '';
-          const watchMatch = href.match(/[?&]v=([a-zA-Z0-9_-]+)/);
-          const shortsMatch = href.match(/\/shorts\/([a-zA-Z0-9_-]+)/);
-          if (watchMatch) videoId = watchMatch[1];
-          if (shortsMatch) {
-            videoId = shortsMatch[1];
-            isShort = true;
+          const urlMatch = href.match(YT_REGEX.VIDEO_ID_URL);
+          if (urlMatch) {
+            videoId = urlMatch[1];
+            if (href.includes('/shorts/')) isShort = true;
           }
-          // Try data attributes if no href match
+          // Try data attributes
           if (!videoId) {
             const dataId = linkEl.getAttribute('data-id') || linkEl.getAttribute('data-video-id');
-            if (dataId) videoId = dataId;
+            if (dataId && YT_REGEX.VIDEO_ID.test(dataId)) videoId = dataId;
           }
         }
       }
       
-      // === Step 2: Get video ID from content-id class (YouTube Dec 2024 DOM) ===
+      // Tier 2: content-id class (YouTube Dec 2024 DOM)
       if (!videoId) {
-        const contentIdMatch = lockupClasses.match(/content-id-([a-zA-Z0-9_-]+)/);
-        if (contentIdMatch) {
-          videoId = contentIdMatch[1];
-        }
+        const contentIdMatch = lockupClasses.match(YT_REGEX.CONTENT_ID_CLASS);
+        if (contentIdMatch) videoId = contentIdMatch[1];
       }
       
-      // === Step 3: Check data attributes on card/lockup model ===
+      // Tier 3: data attributes on card/lockup
       if (!videoId) {
-        const dataId = card.getAttribute('data-id') || 
-                       card.getAttribute('data-video-id') ||
-                       lockupModel.getAttribute('data-id');
-        if (dataId) videoId = dataId;
+        const attrs = ['data-id', 'data-video-id', 'data-context-item-id'];
+        for (const attr of attrs) {
+          const val = card.getAttribute(attr) || lockupModel.getAttribute(attr);
+          if (val && YT_REGEX.VIDEO_ID.test(val)) {
+            videoId = val.match(YT_REGEX.VIDEO_ID)[0];
+            break;
+          }
+        }
       }
       
-      // === Step 4: Fallback - get from href links ===
+      // Tier 4: href links with yt-dlp regex
       if (!videoId) {
-        const watchLink = card.querySelector('a[href*="/watch?v="]');
-        if (watchLink) {
-          const href = watchLink.getAttribute('href');
-          const match = href.match(/[?&]v=([a-zA-Z0-9_-]+)/);
-          if (match) videoId = match[1];
+        const links = card.querySelectorAll('a[href]');
+        for (const link of links) {
+          const href = link.getAttribute('href') || '';
+          const urlMatch = href.match(YT_REGEX.VIDEO_ID_URL);
+          if (urlMatch) {
+            videoId = urlMatch[1];
+            if (YT_REGEX.SHORTS_URL.test(href)) isShort = true;
+            break;
+          }
         }
       }
       
-      // Check for shorts (various detection methods)
-      const shortsLink = card.querySelector('a[href*="/shorts/"]');
-      if (shortsLink) {
-        isShort = true;
-        if (!videoId) {
-          const match = shortsLink.getAttribute('href')?.match(/\/shorts\/([a-zA-Z0-9_-]+)/);
-          if (match) videoId = match[1];
-        }
-      }
-      if (lockupClasses.includes('yt-lockup-view-model--shorts')) {
-        isShort = true;
+      // Tier 5: Scan HTML for any valid video ID pattern (last resort)
+      if (!videoId) {
+        const htmlMatch = cardHtml.match(/(?:v=|\/v\/|\/embed\/|\/shorts\/|content-id-)([a-zA-Z0-9_-]{11})/);
+        if (htmlMatch) videoId = htmlMatch[1];
       }
       
-      // === Get title using provided selector or fallbacks ===
-      if (selectors.titleSelector) {
-        const titleEl = card.querySelector(selectors.titleSelector);
-        if (titleEl) {
-          title = titleEl.getAttribute('title') || titleEl.textContent?.trim() || '';
-        }
-      }
-      if (!title) {
-        const h3 = card.querySelector('h3[title]');
-        if (h3) title = h3.getAttribute('title') || '';
-      }
-      if (!title) {
-        const span = card.querySelector('.yt-core-attributed-string');
-        if (span) title = span.textContent?.trim() || '';
+      // === SHORTS DETECTION (yt-dlp style) ===
+      if (!isShort) {
+        isShort = YT_REGEX.SHORTS_CLASS.test(lockupClasses) ||
+                  !!card.querySelector('a[href*="/shorts/"]') ||
+                  !!card.querySelector('[is-shorts]') ||
+                  lockupClasses.includes('shorts') ||
+                  lockupClasses.includes('reel');
       }
       
-      // === Get channel using provided selector or fallbacks ===
-      if (selectors.channelSelector) {
-        const channelEl = card.querySelector(selectors.channelSelector);
-        if (channelEl) channelName = channelEl.textContent?.trim() || 'Unknown';
-      }
-      if (channelName === 'Unknown') {
-        const subtitleEl = card.querySelector('.yt-lockup-metadata-view-model__subtitle a');
-        if (subtitleEl) channelName = subtitleEl.textContent?.trim() || 'Unknown';
+      // === TITLE EXTRACTION ===
+      const titleSelectors = selectors.titleSelector ? 
+        selectors.titleSelector.split(',').map(s => s.trim()) : [];
+      titleSelectors.push('#video-title', 'h3[title]', '.yt-core-attributed-string', 'a[title]');
+      
+      for (const sel of titleSelectors) {
+        if (title) break;
+        try {
+          const el = card.querySelector(sel);
+          if (el) {
+            title = el.getAttribute('title') || el.textContent?.trim() || '';
+          }
+        } catch (e) { /* invalid selector */ }
       }
       
-      // === Get metadata using provided metaSelector ===
-      if (selectors.metaSelector) {
-        const metaEl = card.querySelector(selectors.metaSelector);
-        if (metaEl) {
-          const metaText = metaEl.textContent?.trim() || '';
-          // Parse view count (e.g., "123K views", "1.2M views")
-          const viewMatch = metaText.match(/([0-9.,]+[KMB]?)\s*views?/i);
-          if (viewMatch) metadata.viewCount = viewMatch[1];
-          // Parse upload date (e.g., "2 days ago", "3 weeks ago")
-          const dateMatch = metaText.match(/(\d+\s*(?:second|minute|hour|day|week|month|year)s?\s*ago)/i);
-          if (dateMatch) metadata.uploadDate = dateMatch[1];
+      // === CHANNEL EXTRACTION (with yt-dlp UCID/Handle patterns) ===
+      const channelSelectors = selectors.channelSelector ?
+        selectors.channelSelector.split(',').map(s => s.trim()) : [];
+      channelSelectors.push('#channel-name a', '.yt-lockup-metadata-view-model__subtitle a', 'ytd-channel-name a');
+      
+      for (const sel of channelSelectors) {
+        if (channelName !== 'Unknown') break;
+        try {
+          const el = card.querySelector(sel);
+          if (el) {
+            channelName = el.textContent?.trim() || 'Unknown';
+            // Extract channel ID if available
+            const href = el.getAttribute('href') || '';
+            const ucidMatch = href.match(YT_REGEX.CHANNEL_UCID);
+            const handleMatch = href.match(YT_REGEX.CHANNEL_HANDLE);
+            if (ucidMatch) channelId = ucidMatch[0];
+            else if (handleMatch) channelId = handleMatch[0];
+          }
+        } catch (e) { /* invalid selector */ }
+      }
+      
+      // === METADATA EXTRACTION (yt-dlp regex patterns) ===
+      const metaSelectors = selectors.metaSelector ?
+        [selectors.metaSelector] : [];
+      metaSelectors.push('#metadata-line', '#metadata', '.yt-lockup-metadata-view-model', '.inline-metadata-item');
+      
+      for (const sel of metaSelectors) {
+        try {
+          const metaEls = card.querySelectorAll(sel);
+          for (const metaEl of metaEls) {
+            const text = metaEl.textContent?.trim() || '';
+            // View count (multi-language support)
+            if (!metadata.viewCount) {
+              const viewMatch = text.match(YT_REGEX.VIEW_COUNT);
+              if (viewMatch) metadata.viewCount = viewMatch[1];
+            }
+            // Upload date (multi-language support)
+            if (!metadata.uploadDate) {
+              const dateMatch = text.match(YT_REGEX.UPLOAD_DATE);
+              if (dateMatch) metadata.uploadDate = text;
+            }
+          }
+        } catch (e) { /* invalid selector */ }
+      }
+      
+      // Duration from overlay
+      const durationEl = card.querySelector('#time-status, .ytd-thumbnail-overlay-time-status-renderer, [overlay-style="DEFAULT"]');
+      if (durationEl) {
+        const durationMatch = durationEl.textContent?.match(YT_REGEX.DURATION);
+        if (durationMatch) {
+          metadata.duration = durationEl.textContent.trim();
         }
+      }
+      
+      // Validate video ID format (must be exactly 11 chars)
+      if (videoId && !YT_REGEX.VIDEO_ID.test(videoId)) {
+        videoId = null;
       }
       
       if (!videoId) return null;
       if (!title) title = 'Untitled';
       
-      return { videoId, title, channelName, isShort, metadata };
+      return { videoId, title, channelName, channelId, isShort, metadata };
     } catch (e) {
       return null;
     }
@@ -317,9 +396,13 @@
           videoId: result.videoId,
           title: result.title,
           channelName: result.channelName,
+          channelId: result.channelId,
           thumbnailUrl: `https://img.youtube.com/vi/${result.videoId}/mqdefault.jpg`,
           source: result.isShort ? 'shorts' : 'home_feed',
           sourcePhase: result.isShort ? 'shorts' : 'home_feed',
+          viewCount: result.metadata?.viewCount,
+          uploadDate: result.metadata?.uploadDate,
+          duration: result.metadata?.duration,
           collectedAt: new Date().toISOString()
         };
         

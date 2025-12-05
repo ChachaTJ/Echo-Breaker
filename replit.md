@@ -178,6 +178,16 @@ EchoBreaker is a web application + Chrome extension system designed to help user
   - Metadata extraction (view count, upload date) via metaSelector
   - Successful selectors are cached for faster future extraction
   - API endpoint: `POST /api/analyze-selectors`
+- **NEW: yt-dlp Inspired Regex Patterns**
+  - Reference: https://github.com/yt-dlp/yt-dlp
+  - Video ID: 11-character `[a-zA-Z0-9_-]{11}` pattern
+  - Channel UCID: `UC[0-9A-Za-z_-]{22}` pattern
+  - Channel Handle: `@[0-9A-Za-z_]+` pattern
+  - Playlist ID: PL/LL/EC/UU/FL/RD patterns
+  - Multi-language view count parsing (views, 조회, 視聴)
+  - Multi-language upload date parsing (ago, 전)
+  - Duration extraction from overlay
+  - 5-tier video ID extraction fallback chain
 - **NEW: 3D Filter Bubble Visualization**
   - Three.js WebGL rendering with soap bubble effect nodes
   - Thumbnails distorted inside transparent bubbles using fisheye shader
