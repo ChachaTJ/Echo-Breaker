@@ -14,6 +14,8 @@ interface VideoNode {
   position: [number, number, number];
   cluster: number;
   clusterName: string;
+  sourcePhase?: 'home_feed' | 'watch_history' | 'subscriptions' | 'search' | 'recommended';
+  significanceWeight?: number;
 }
 
 interface VideoConstellationProps {
@@ -21,6 +23,15 @@ interface VideoConstellationProps {
   clusters: { id: number; name: string; color: string }[];
   onNodeClick?: (video: VideoNode) => void;
 }
+
+// Source phase colors for visual differentiation
+const SOURCE_PHASE_COLORS: Record<string, string> = {
+  watch_history: '#3B82F6', // blue - solid ring
+  home_feed: '#22C55E',     // green - dashed ring
+  subscriptions: '#A855F7', // purple - dotted ring
+  search: '#EAB308',        // yellow - double ring
+  recommended: '#F97316',   // orange - thin ring
+};
 
 const CLUSTER_COLORS = [
   '#FF6B6B', // Red
@@ -155,8 +166,59 @@ export function VideoConstellation({ videos, clusters, onNodeClick }: VideoConst
     return material;
   }, []);
 
-  // Create outline ring
-  const createOutlineRing = useCallback((color: string, radius: number) => {
+  // Create outline ring with source phase differentiation
+  const createOutlineRing = useCallback((color: string, radius: number, sourcePhase?: string) => {
+    const segments = 64;
+    const points: THREE.Vector3[] = [];
+    
+    // Different ring patterns based on source phase
+    const skipPattern = (() => {
+      switch (sourcePhase) {
+        case 'home_feed': return { skip: 2, draw: 6 }; // dashed
+        case 'subscriptions': return { skip: 1, draw: 3 }; // dotted
+        case 'search': return { skip: 0, draw: 8 }; // double (will add inner ring)
+        case 'recommended': return { skip: 0, draw: 8 }; // thin
+        case 'watch_history': 
+        default: return { skip: 0, draw: 8 }; // solid
+      }
+    })();
+    
+    for (let i = 0; i <= segments; i++) {
+      const segmentIndex = Math.floor(i / 8);
+      const inSkip = (segmentIndex % (skipPattern.skip + skipPattern.draw)) < skipPattern.skip;
+      
+      // Skip segments for dashed/dotted patterns
+      if (skipPattern.skip > 0 && inSkip) {
+        if (points.length > 0) {
+          // Break the line
+        }
+        continue;
+      }
+      
+      const theta = (i / segments) * Math.PI * 2;
+      points.push(new THREE.Vector3(
+        Math.cos(theta) * radius,
+        Math.sin(theta) * radius,
+        0
+      ));
+    }
+    
+    // Use source phase color if available, otherwise cluster color
+    const ringColor = sourcePhase ? SOURCE_PHASE_COLORS[sourcePhase] || color : color;
+    
+    const geometry = new THREE.BufferGeometry().setFromPoints(points);
+    const material = new THREE.LineBasicMaterial({
+      color: new THREE.Color(ringColor),
+      transparent: true,
+      opacity: sourcePhase === 'recommended' ? 0.5 : 0.9,
+      linewidth: sourcePhase === 'recommended' ? 1 : 2,
+    });
+    
+    return new THREE.Line(geometry, material);
+  }, []);
+  
+  // Create secondary inner ring for search phase (double ring effect)
+  const createInnerRing = useCallback((color: string, radius: number) => {
     const segments = 64;
     const points: THREE.Vector3[] = [];
     
@@ -173,8 +235,8 @@ export function VideoConstellation({ videos, clusters, onNodeClick }: VideoConst
     const material = new THREE.LineBasicMaterial({
       color: new THREE.Color(color),
       transparent: true,
-      opacity: 0.8,
-      linewidth: 2,
+      opacity: 0.6,
+      linewidth: 1,
     });
     
     return new THREE.Line(geometry, material);
@@ -414,8 +476,15 @@ export function VideoConstellation({ videos, clusters, onNodeClick }: VideoConst
     videos.forEach((video) => {
       const clusterColor = CLUSTER_COLORS[video.cluster % CLUSTER_COLORS.length];
       
+      // Scale bubble size based on significance weight (30-80 maps to 1.5-2.5)
+      const baseSize = 2;
+      const sizeMultiplier = video.significanceWeight 
+        ? 0.75 + (video.significanceWeight / 100) * 0.75
+        : 1;
+      const bubbleSize = baseSize * sizeMultiplier;
+      
       // Main bubble sphere with thumbnail
-      const geometry = new THREE.SphereGeometry(2, 64, 64);
+      const geometry = new THREE.SphereGeometry(bubbleSize, 64, 64);
       const material = createBubbleMaterial(video.thumbnailUrl, clusterColor);
       const mesh = new THREE.Mesh(geometry, material);
       
@@ -425,12 +494,21 @@ export function VideoConstellation({ videos, clusters, onNodeClick }: VideoConst
       scene.add(mesh);
       nodesRef.current.set(video.id, mesh);
 
-      // Colored outline ring
-      const outlineRing = createOutlineRing(clusterColor, 2.1);
+      // Colored outline ring with source phase differentiation
+      const outlineRing = createOutlineRing(clusterColor, bubbleSize + 0.1, video.sourcePhase);
       outlineRing.position.copy(mesh.position);
-      outlineRing.userData = { nodeId: video.id };
+      outlineRing.userData = { nodeId: video.id, sourcePhase: video.sourcePhase };
       scene.add(outlineRing);
       outlineRingsRef.current.push(outlineRing);
+      
+      // Add inner ring for search phase (double ring effect)
+      if (video.sourcePhase === 'search') {
+        const innerRing = createInnerRing(SOURCE_PHASE_COLORS.search, bubbleSize * 0.85);
+        innerRing.position.copy(mesh.position);
+        innerRing.userData = { nodeId: video.id, isInner: true };
+        scene.add(innerRing);
+        outlineRingsRef.current.push(innerRing);
+      }
     });
 
     // Connection lines between same-cluster or nearby videos
@@ -465,7 +543,7 @@ export function VideoConstellation({ videos, clusters, onNodeClick }: VideoConst
         }
       });
     });
-  }, [videos, createBubbleMaterial, createOutlineRing]);
+  }, [videos, createBubbleMaterial, createOutlineRing, createInnerRing]);
 
   // Controls
   const toggleAutoRotate = () => {

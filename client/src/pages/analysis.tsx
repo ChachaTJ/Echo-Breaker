@@ -1,18 +1,19 @@
 import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { BarChart3, RefreshCw, AlertTriangle, TrendingUp, Sparkles, FlaskConical } from "lucide-react";
+import { BarChart3, RefreshCw, AlertTriangle, TrendingUp, Sparkles, FlaskConical, Gauge, Eye, PlayCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
+import { Progress } from "@/components/ui/progress";
 import { BiasMeter } from "@/components/bias-meter";
 import { CategoryChart } from "@/components/category-chart";
 import { BiasVisualization } from "@/components/bias-visualization";
 import { VideoConstellation } from "@/components/video-constellation";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
-import type { AnalysisResult, Video, CategoryDistribution } from "@shared/schema";
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from "recharts";
+import type { AnalysisResult, Video, CategoryDistribution, StanceBreakdown } from "@shared/schema";
 
 interface ConstellationData {
   videos: Array<{
@@ -24,6 +25,8 @@ interface ConstellationData {
     position: [number, number, number];
     cluster: number;
     clusterName: string;
+    sourcePhase?: 'home_feed' | 'watch_history' | 'subscriptions' | 'search' | 'recommended';
+    significanceWeight?: number;
   }>;
   clusters: Array<{
     id: number;
@@ -31,6 +34,14 @@ interface ConstellationData {
     color: string;
   }>;
 }
+
+// Stance colors for visualization
+const STANCE_COLORS = {
+  progressive: "#3B82F6", // blue
+  conservative: "#EF4444", // red
+  centrist: "#22C55E", // green
+  nonPolitical: "#9CA3AF", // gray
+};
 
 // Generate mock constellation data for test mode
 function generateMockConstellationData(): ConstellationData {
@@ -70,6 +81,9 @@ function generateMockConstellationData(): ConstellationData {
     [-12, 0, -15],  // Music
   ];
 
+  const sourcePhases: Array<'home_feed' | 'watch_history' | 'subscriptions' | 'search' | 'recommended'> = 
+    ['home_feed', 'watch_history', 'subscriptions', 'search', 'recommended'];
+  
   const videos = sampleVideos.map((video, i) => {
     const center = clusterCenters[video.cluster];
     const jitter = () => (Math.random() - 0.5) * 10;
@@ -87,6 +101,8 @@ function generateMockConstellationData(): ConstellationData {
       ] as [number, number, number],
       cluster: video.cluster,
       clusterName: ["Technology", "Business", "Lifestyle", "Travel", "Gaming", "Music"][video.cluster],
+      sourcePhase: sourcePhases[i % sourcePhases.length],
+      significanceWeight: Math.floor(Math.random() * 50) + 30,
     };
   });
 
@@ -250,6 +266,177 @@ export default function Analysis() {
             />
           </div>
 
+          {/* Entropy Score and Stance Breakdown */}
+          <div className="grid gap-6 lg:grid-cols-2">
+            {/* Entropy Score Card */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Gauge className="h-5 w-5" />
+                  Viewpoint Diversity
+                </CardTitle>
+                <CardDescription>
+                  Shannon entropy score - higher means more diverse perspectives
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <span className="text-4xl font-bold">
+                      {analysis.entropyScore ?? '--'}
+                    </span>
+                    <span className="text-sm text-muted-foreground">/100</span>
+                  </div>
+                  <Progress 
+                    value={analysis.entropyScore ?? 50} 
+                    className="h-3"
+                  />
+                  <p className="text-sm text-muted-foreground">
+                    {(analysis.entropyScore ?? 50) >= 70 
+                      ? "Great diversity! You consume content from varied perspectives."
+                      : (analysis.entropyScore ?? 50) >= 40
+                      ? "Moderate diversity. Consider exploring different viewpoints."
+                      : "Low diversity detected. Your content leans heavily toward one perspective."}
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Stance Breakdown Card */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Eye className="h-5 w-5" />
+                  Political Stance Distribution
+                </CardTitle>
+                <CardDescription>
+                  Content classification by political perspective
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                {analysis.stanceBreakdown ? (
+                  <div className="space-y-3">
+                    {[
+                      { key: 'progressive' as const, label: 'Progressive', color: STANCE_COLORS.progressive },
+                      { key: 'conservative' as const, label: 'Conservative', color: STANCE_COLORS.conservative },
+                      { key: 'centrist' as const, label: 'Centrist', color: STANCE_COLORS.centrist },
+                      { key: 'nonPolitical' as const, label: 'Non-Political', color: STANCE_COLORS.nonPolitical },
+                    ].map(({ key, label, color }) => {
+                      const data = analysis.stanceBreakdown?.[key];
+                      return (
+                        <div key={key} className="space-y-1">
+                          <div className="flex items-center justify-between text-sm">
+                            <span className="flex items-center gap-2">
+                              <div 
+                                className="w-3 h-3 rounded-full" 
+                                style={{ backgroundColor: color }}
+                              />
+                              {label}
+                            </span>
+                            <span className="font-medium">
+                              {data?.count ?? 0} ({data?.percentage ?? 0}%)
+                            </span>
+                          </div>
+                          <Progress 
+                            value={data?.percentage ?? 0} 
+                            className="h-2"
+                            style={{ 
+                              '--progress-indicator': color 
+                            } as React.CSSProperties}
+                          />
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground">
+                    Run analysis with Gemini to see stance breakdown.
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* 3D Video Constellation - Moved up for prominence */}
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <CardTitle className="flex items-center gap-2">
+                    <Sparkles className="h-5 w-5" />
+                    Filter Bubble Visualization
+                    {testMode && (
+                      <Badge variant="outline" className="ml-2 text-orange-600 dark:text-orange-400 border-orange-500/50">
+                        <FlaskConical className="h-3 w-3 mr-1" />
+                        Test Mode
+                      </Badge>
+                    )}
+                  </CardTitle>
+                  <CardDescription>
+                    3D soap bubbles show your video ecosystem - color indicates source type
+                  </CardDescription>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {!testMode && constellationLoading ? (
+                <Skeleton className="h-[500px] w-full rounded-lg" />
+              ) : displayConstellationData && displayConstellationData.videos.length > 0 ? (
+                <div className="h-[500px] w-full">
+                  <VideoConstellation
+                    videos={displayConstellationData.videos}
+                    clusters={displayConstellationData.clusters}
+                  />
+                </div>
+              ) : (
+                <div className="flex flex-col items-center justify-center h-[300px] text-center text-muted-foreground">
+                  <Sparkles className="h-12 w-12 mb-4 opacity-50" />
+                  <p>Collect more videos to see the filter bubble</p>
+                  <p className="text-sm mt-1">At least 3 videos are needed</p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Source Phase Legend */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <PlayCircle className="h-5 w-5" />
+                Video Sources
+              </CardTitle>
+              <CardDescription>
+                Bubble ring style indicates how you discovered each video
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="flex flex-wrap gap-4">
+                <div className="flex items-center gap-2">
+                  <div className="w-4 h-4 rounded-full border-2 border-solid border-blue-500" />
+                  <span className="text-sm">Watch History</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-4 h-4 rounded-full border-2 border-dashed border-green-500" />
+                  <span className="text-sm">Home Feed</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-4 h-4 rounded-full border-2 border-dotted border-purple-500" />
+                  <span className="text-sm">Subscriptions</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-4 h-4 rounded-full border-2 border-solid border-yellow-500" style={{ borderStyle: 'double' }} />
+                  <span className="text-sm">Search</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-4 h-4 rounded-full border border-orange-500/50" />
+                  <span className="text-sm">Recommended</span>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <BiasVisualization videos={videos || []} analysis={analysis} />
+
           <div className="grid gap-6 lg:grid-cols-2">
             <Card>
               <CardHeader>
@@ -311,49 +498,6 @@ export default function Analysis() {
               </CardContent>
             </Card>
           </div>
-
-          <BiasVisualization videos={videos || []} analysis={analysis} />
-
-          {/* 3D Video Constellation */}
-          <Card>
-            <CardHeader>
-              <div className="flex items-center justify-between gap-2">
-                <div>
-                  <CardTitle className="flex items-center gap-2">
-                    <Sparkles className="h-5 w-5" />
-                    Video Constellation
-                    {testMode && (
-                      <Badge variant="outline" className="ml-2 text-orange-600 dark:text-orange-400 border-orange-500/50">
-                        <FlaskConical className="h-3 w-3 mr-1" />
-                        Test Mode
-                      </Badge>
-                    )}
-                  </CardTitle>
-                  <CardDescription>
-                    3D visualization of your video collection - similar videos cluster together
-                  </CardDescription>
-                </div>
-              </div>
-            </CardHeader>
-            <CardContent>
-              {!testMode && constellationLoading ? (
-                <Skeleton className="h-[500px] w-full rounded-lg" />
-              ) : displayConstellationData && displayConstellationData.videos.length > 0 ? (
-                <div className="h-[500px] w-full">
-                  <VideoConstellation
-                    videos={displayConstellationData.videos}
-                    clusters={displayConstellationData.clusters}
-                  />
-                </div>
-              ) : (
-                <div className="flex flex-col items-center justify-center h-[300px] text-center text-muted-foreground">
-                  <Sparkles className="h-12 w-12 mb-4 opacity-50" />
-                  <p>Collect more videos to see the constellation</p>
-                  <p className="text-sm mt-1">At least 3 videos are needed</p>
-                </div>
-              )}
-            </CardContent>
-          </Card>
 
           {analysis.biasScore < 35 || analysis.biasScore > 65 ? (
             <Card className="border-orange-500/50 bg-orange-500/5">

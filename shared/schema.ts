@@ -4,7 +4,7 @@ import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
 // Video source phase enum - where the video was collected from
-export type VideoSourcePhase = 'watch_history' | 'home_feed' | 'search' | 'recommended' | 'subscription';
+export type VideoSourcePhase = 'watch_history' | 'home_feed' | 'search' | 'recommended' | 'subscriptions';
 
 // Video data collected from YouTube
 export const videos = pgTable("videos", {

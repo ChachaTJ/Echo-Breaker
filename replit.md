@@ -123,6 +123,33 @@ EchoBreaker is a web application + Chrome extension system designed to help user
 - Chrome extension with auto-crawling of YouTube data
 - OpenAI integration for AI-powered bias analysis with graceful fallbacks
 - Theme system with dark/light mode toggle
+- **NEW: Gemini AI Video Stance Analysis**
+  - Batch video analysis using Gemini 2.5 Flash via Replit AI Integrations
+  - Political stance detection: progressive, conservative, centrist, non-political
+  - Stance probability distribution stored per video
+  - Content type classification (political, news, entertainment, tech, etc.)
+- **NEW: Shannon Entropy Viewpoint Diversity Score**
+  - Calculates diversity metric from stance distribution
+  - 0-100 score (100 = maximum diversity, equal distribution)
+  - Displayed in dedicated Viewpoint Diversity card
+- **NEW: Video Source Phase Tracking**
+  - Tracks where each video was discovered: watch_history, home_feed, subscriptions, search, recommended
+  - Different bubble ring styles in visualization:
+    - Watch History: solid blue ring
+    - Home Feed: dashed green ring
+    - Subscriptions: dotted purple ring
+    - Search: double yellow ring
+    - Recommended: thin orange ring
+- **NEW: Significance Weight Bubble Scaling**
+  - Videos scale in bubble size based on significance (30-80 weight range)
+  - Watch history videos appear larger than home feed recommendations
+- **NEW: Stance Breakdown Visualization**
+  - Progress bars showing political stance distribution
+  - Color-coded: progressive (blue), conservative (red), centrist (green), non-political (gray)
+- **Analysis Page UI Improvements**
+  - Filter Bubble Visualization moved higher for prominence
+  - Added Video Sources legend explaining ring styles
+  - Added Viewpoint Diversity and Political Stance Distribution cards
 - Proper error handling for API endpoints
 - **NEW: 2D-3D Echo Chamber Visualization** (inspired by PolitEcho)
   - Interactive visualization showing channel distribution by political bias
