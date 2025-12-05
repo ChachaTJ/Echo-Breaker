@@ -237,7 +237,12 @@ EchoBreaker is a web application + Chrome extension system designed to help user
 ## Known Limitations
 - Chrome extension needs icon files (16x16, 48x48, 128x128 PNG) - removed from manifest to allow loading
 - Fallback analysis when OpenAI unavailable uses simplified heuristics
-- In-memory storage resets on server restart (consider adding PostgreSQL for persistence)
+
+## Database
+- PostgreSQL database is now configured for persistent storage
+- All video data, subscriptions, snapshots, and analysis results are saved to the database
+- Data persists across server restarts
+- Database schema managed via Drizzle ORM with `npm run db:push`
 
 ## Development Notes
 - Frontend binds to port 5000
