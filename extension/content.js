@@ -162,7 +162,7 @@
     try {
       await log('info', `AI 셀렉터 분석 요청`, { pageType, htmlLen: htmlSnippet.length });
       
-      const response = await fetch(`${CONFIG.SERVER_URL}/api/analyze-selectors`, {
+      const response = await fetch(`${CONFIG.API_BASE_URL}/api/analyze-selectors`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ htmlSnippet, pageType })
@@ -319,9 +319,30 @@
       shorts = result.shorts;
     }
     
-    // Step 2: If failed, request AI analysis
+    // Step 2: Try default selectors
     if (videos.length === 0 && shorts.length === 0) {
-      await log('warning', `캐싱된 셀렉터 실패 - AI 분석 요청`);
+      await log('info', `기본 셀렉터로 추출 시도`);
+      
+      // Build default selectors object from DEFAULT_SELECTORS
+      const defaultSels = {
+        titleSelector: DEFAULT_SELECTORS.video_title[pageType] || DEFAULT_SELECTORS.video_title.default,
+        channelSelector: DEFAULT_SELECTORS.channel_name[pageType] || DEFAULT_SELECTORS.channel_name.default,
+        videoIdSelector: DEFAULT_SELECTORS.video_link[pageType] || DEFAULT_SELECTORS.video_link.default,
+        metaSelector: null
+      };
+      
+      const result = extractAllWithSelectors(cards, defaultSels);
+      videos = result.videos;
+      shorts = result.shorts;
+      
+      if (videos.length > 0 || shorts.length > 0) {
+        await log('success', `기본 셀렉터 성공`, { videos: videos.length, shorts: shorts.length });
+      }
+    }
+    
+    // Step 3: If failed, request AI analysis
+    if (videos.length === 0 && shorts.length === 0) {
+      await log('warning', `기본 셀렉터 실패 - AI 분석 요청`);
       
       // Get sample HTML
       const sampleCard = cards[0];
@@ -345,7 +366,7 @@
       }
     }
     
-    // Step 3: Final fallback - hardcoded extraction
+    // Step 4: Final fallback - hardcoded extraction for YouTube's December 2024 DOM
     if (videos.length === 0 && shorts.length === 0) {
       await log('warning', `AI도 실패 - 폴백 추출 사용`);
       
