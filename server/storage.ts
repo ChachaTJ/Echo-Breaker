@@ -8,17 +8,7 @@ import {
   type PlaylistItem, type InsertPlaylistItem,
   type VideoInsight, type InsertVideoInsight,
   type DashboardStats,
-  videos,
-  subscriptions,
-  snapshots,
-  analysisResults,
-  recommendations,
-  backgroundPlaylist,
-  videoInsights,
-  users
 } from "@shared/schema";
-import { db } from "./db";
-import { eq, desc, sql, inArray } from "drizzle-orm";
 
 export interface IStorage {
   // Users
@@ -85,57 +75,85 @@ export interface IStorage {
   deleteAllData(): Promise<void>;
 }
 
-export class DatabaseStorage implements IStorage {
+function generateId(): string {
+  return crypto.randomUUID();
+}
+
+export class MemStorage implements IStorage {
+  private users: Map<string, User> = new Map();
+  private videos: Map<string, Video> = new Map();
+  private subscriptions: Map<string, Subscription> = new Map();
+  private snapshots: Map<string, Snapshot> = new Map();
+  private analysisResults: AnalysisResult[] = [];
+  private recommendations: Map<string, Recommendation> = new Map();
+  private playlistItems: Map<string, PlaylistItem> = new Map();
+  private videoInsights: Map<string, VideoInsight> = new Map();
+
   // Users
   async getUser(id: string): Promise<User | undefined> {
-    const [user] = await db.select().from(users).where(eq(users.id, id));
-    return user || undefined;
+    return this.users.get(id);
   }
 
   async getUserByUsername(username: string): Promise<User | undefined> {
-    const [user] = await db.select().from(users).where(eq(users.username, username));
-    return user || undefined;
+    return Array.from(this.users.values()).find(u => u.username === username);
   }
 
   async createUser(insertUser: InsertUser): Promise<User> {
-    const [user] = await db.insert(users).values(insertUser).returning();
+    const user: User = {
+      id: generateId(),
+      username: insertUser.username,
+      password: insertUser.password,
+    };
+    this.users.set(user.id, user);
     return user;
   }
 
   // Videos
   async getVideos(): Promise<Video[]> {
-    return await db.select().from(videos).orderBy(desc(videos.collectedAt));
+    return Array.from(this.videos.values())
+      .sort((a, b) => new Date(b.collectedAt!).getTime() - new Date(a.collectedAt!).getTime());
   }
 
   async getVideo(id: string): Promise<Video | undefined> {
-    const [video] = await db.select().from(videos).where(eq(videos.id, id));
-    return video || undefined;
+    return this.videos.get(id);
   }
 
   async createVideo(video: InsertVideo): Promise<Video> {
-    // Check for duplicate by videoId
-    const [existing] = await db.select().from(videos).where(eq(videos.videoId, video.videoId));
+    const existing = Array.from(this.videos.values()).find(v => v.videoId === video.videoId);
     
     if (existing) {
       const newSignificance = video.significanceWeight ?? 50;
       const existingSignificance = existing.significanceWeight ?? 50;
       
       if (newSignificance > existingSignificance) {
-        const [updated] = await db
-          .update(videos)
-          .set({
-            sourcePhase: (video.sourcePhase || existing.sourcePhase) as any,
-            significanceWeight: newSignificance,
-            collectedAt: new Date(),
-          })
-          .where(eq(videos.id, existing.id))
-          .returning();
+        const updated: Video = {
+          ...existing,
+          sourcePhase: (video.sourcePhase || existing.sourcePhase) as any,
+          significanceWeight: newSignificance,
+          collectedAt: new Date(),
+        };
+        this.videos.set(existing.id, updated);
         return updated;
       }
       return existing;
     }
     
-    const [newVideo] = await db.insert(videos).values(video as any).returning();
+    const newVideo: Video = {
+      id: generateId(),
+      videoId: video.videoId,
+      title: video.title,
+      channelName: video.channelName,
+      channelId: video.channelId || null,
+      thumbnailUrl: video.thumbnailUrl || null,
+      viewCount: video.viewCount || null,
+      duration: video.duration || null,
+      category: video.category || null,
+      tags: video.tags || null,
+      sourcePhase: (video.sourcePhase || 'home_feed') as any,
+      significanceWeight: video.significanceWeight ?? 50,
+      collectedAt: new Date(),
+    };
+    this.videos.set(newVideo.id, newVideo);
     return newVideo;
   }
 
@@ -149,21 +167,31 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deleteAllVideos(): Promise<void> {
-    await db.delete(videos);
+    this.videos.clear();
   }
 
   // Subscriptions
   async getSubscriptions(): Promise<Subscription[]> {
-    return await db.select().from(subscriptions).orderBy(desc(subscriptions.collectedAt));
+    return Array.from(this.subscriptions.values())
+      .sort((a, b) => new Date(b.collectedAt!).getTime() - new Date(a.collectedAt!).getTime());
   }
 
   async createSubscription(sub: InsertSubscription): Promise<Subscription> {
-    // Check for duplicate by channelId
-    const [existing] = await db.select().from(subscriptions).where(eq(subscriptions.channelId, sub.channelId));
+    const existing = Array.from(this.subscriptions.values()).find(s => s.channelId === sub.channelId);
     if (existing) {
       return existing;
     }
-    const [newSub] = await db.insert(subscriptions).values(sub).returning();
+    
+    const newSub: Subscription = {
+      id: generateId(),
+      channelId: sub.channelId,
+      channelName: sub.channelName,
+      thumbnailUrl: sub.thumbnailUrl || null,
+      subscriberCount: sub.subscriberCount || null,
+      videoCount: sub.videoCount || null,
+      collectedAt: new Date(),
+    };
+    this.subscriptions.set(newSub.id, newSub);
     return newSub;
   }
 
@@ -177,217 +205,265 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deleteAllSubscriptions(): Promise<void> {
-    await db.delete(subscriptions);
+    this.subscriptions.clear();
   }
 
   // Snapshots
   async getSnapshots(): Promise<Snapshot[]> {
-    return await db.select().from(snapshots).orderBy(desc(snapshots.createdAt));
+    return Array.from(this.snapshots.values())
+      .sort((a, b) => new Date(b.createdAt!).getTime() - new Date(a.createdAt!).getTime());
   }
 
   async getSnapshot(id: string): Promise<Snapshot | undefined> {
-    const [snapshot] = await db.select().from(snapshots).where(eq(snapshots.id, id));
-    return snapshot || undefined;
+    return this.snapshots.get(id);
   }
 
   async createSnapshot(snapshot: InsertSnapshot): Promise<Snapshot> {
-    const [newSnapshot] = await db.insert(snapshots).values(snapshot).returning();
+    const newSnapshot: Snapshot = {
+      id: generateId(),
+      name: snapshot.name,
+      description: snapshot.description || null,
+      videoIds: snapshot.videoIds || null,
+      thumbnails: snapshot.thumbnails || null,
+      isActive: snapshot.isActive ?? false,
+      createdAt: new Date(),
+    };
+    this.snapshots.set(newSnapshot.id, newSnapshot);
     return newSnapshot;
   }
 
   async updateSnapshot(id: string, data: Partial<Snapshot>): Promise<Snapshot | undefined> {
-    const [updated] = await db
-      .update(snapshots)
-      .set(data)
-      .where(eq(snapshots.id, id))
-      .returning();
-    return updated || undefined;
+    const existing = this.snapshots.get(id);
+    if (!existing) return undefined;
+    
+    const updated = { ...existing, ...data };
+    this.snapshots.set(id, updated);
+    return updated;
   }
 
   async deleteSnapshot(id: string): Promise<void> {
-    await db.delete(snapshots).where(eq(snapshots.id, id));
+    this.snapshots.delete(id);
   }
 
   async deleteAllSnapshots(): Promise<void> {
-    await db.delete(snapshots);
+    this.snapshots.clear();
   }
 
   // Analysis
   async getLatestAnalysis(): Promise<AnalysisResult | null> {
-    const [latest] = await db
-      .select()
-      .from(analysisResults)
-      .orderBy(desc(analysisResults.analyzedAt))
-      .limit(1);
-    return latest || null;
+    if (this.analysisResults.length === 0) return null;
+    return this.analysisResults[this.analysisResults.length - 1];
   }
 
   async createAnalysis(analysis: InsertAnalysis): Promise<AnalysisResult> {
-    const [newAnalysis] = await db.insert(analysisResults).values(analysis as any).returning();
+    const newAnalysis: AnalysisResult = {
+      id: generateId(),
+      biasScore: analysis.biasScore,
+      categories: (analysis.categories as any) || null,
+      topTopics: analysis.topTopics || null,
+      politicalLeaning: analysis.politicalLeaning || null,
+      summary: analysis.summary || null,
+      entropyScore: analysis.entropyScore || null,
+      stanceBreakdown: analysis.stanceBreakdown || null,
+      sourceComparisons: analysis.sourceComparisons || null,
+      politicalVideoCount: analysis.politicalVideoCount ?? 0,
+      analyzedAt: new Date(),
+    };
+    this.analysisResults.push(newAnalysis);
     return newAnalysis;
   }
 
   async deleteAllAnalysis(): Promise<void> {
-    await db.delete(analysisResults);
+    this.analysisResults = [];
   }
 
   // Recommendations
   async getRecommendations(): Promise<Recommendation[]> {
-    return await db.select().from(recommendations).orderBy(desc(recommendations.createdAt));
+    return Array.from(this.recommendations.values())
+      .sort((a, b) => new Date(b.createdAt!).getTime() - new Date(a.createdAt!).getTime());
   }
 
   async getRecommendation(id: string): Promise<Recommendation | undefined> {
-    const [rec] = await db.select().from(recommendations).where(eq(recommendations.id, id));
-    return rec || undefined;
+    return this.recommendations.get(id);
   }
 
   async createRecommendation(rec: InsertRecommendation): Promise<Recommendation> {
-    const [newRec] = await db.insert(recommendations).values(rec).returning();
+    const newRec: Recommendation = {
+      id: generateId(),
+      videoId: rec.videoId,
+      title: rec.title,
+      channelName: rec.channelName,
+      thumbnailUrl: rec.thumbnailUrl || null,
+      reason: rec.reason || null,
+      category: rec.category || null,
+      opposingViewpoint: rec.opposingViewpoint || null,
+      watched: rec.watched ?? false,
+      createdAt: new Date(),
+    };
+    this.recommendations.set(newRec.id, newRec);
     return newRec;
   }
 
   async createRecommendations(recs: InsertRecommendation[]): Promise<Recommendation[]> {
-    if (recs.length === 0) return [];
-    return await db.insert(recommendations).values(recs).returning();
+    const results: Recommendation[] = [];
+    for (const r of recs) {
+      const result = await this.createRecommendation(r);
+      results.push(result);
+    }
+    return results;
   }
 
   async updateRecommendation(id: string, data: Partial<Recommendation>): Promise<Recommendation | undefined> {
-    const [updated] = await db
-      .update(recommendations)
-      .set(data)
-      .where(eq(recommendations.id, id))
-      .returning();
-    return updated || undefined;
+    const existing = this.recommendations.get(id);
+    if (!existing) return undefined;
+    
+    const updated = { ...existing, ...data };
+    this.recommendations.set(id, updated);
+    return updated;
   }
 
   async deleteAllRecommendations(): Promise<void> {
-    await db.delete(recommendations);
+    this.recommendations.clear();
   }
 
   // Playlist
   async getPlaylistItems(): Promise<PlaylistItem[]> {
-    return await db.select().from(backgroundPlaylist).orderBy(backgroundPlaylist.addedAt);
+    return Array.from(this.playlistItems.values())
+      .sort((a, b) => new Date(a.addedAt!).getTime() - new Date(b.addedAt!).getTime());
   }
 
   async getPlaylistItem(id: string): Promise<PlaylistItem | undefined> {
-    const [item] = await db.select().from(backgroundPlaylist).where(eq(backgroundPlaylist.id, id));
-    return item || undefined;
+    return this.playlistItems.get(id);
   }
 
   async createPlaylistItem(item: InsertPlaylistItem): Promise<PlaylistItem> {
-    const [newItem] = await db.insert(backgroundPlaylist).values(item).returning();
+    const newItem: PlaylistItem = {
+      id: generateId(),
+      videoId: item.videoId,
+      title: item.title,
+      channelName: item.channelName,
+      thumbnailUrl: item.thumbnailUrl || null,
+      snapshotId: item.snapshotId || null,
+      status: item.status || 'pending',
+      playCount: item.playCount ?? 0,
+      addedAt: new Date(),
+    };
+    this.playlistItems.set(newItem.id, newItem);
     return newItem;
   }
 
   async createPlaylistItems(items: InsertPlaylistItem[]): Promise<PlaylistItem[]> {
-    if (items.length === 0) return [];
-    return await db.insert(backgroundPlaylist).values(items).returning();
+    const results: PlaylistItem[] = [];
+    for (const item of items) {
+      const result = await this.createPlaylistItem(item);
+      results.push(result);
+    }
+    return results;
   }
 
   async updatePlaylistItem(id: string, data: Partial<PlaylistItem>): Promise<PlaylistItem | undefined> {
-    const [updated] = await db
-      .update(backgroundPlaylist)
-      .set(data)
-      .where(eq(backgroundPlaylist.id, id))
-      .returning();
-    return updated || undefined;
+    const existing = this.playlistItems.get(id);
+    if (!existing) return undefined;
+    
+    const updated = { ...existing, ...data };
+    this.playlistItems.set(id, updated);
+    return updated;
   }
 
   async deletePlaylistItem(id: string): Promise<void> {
-    await db.delete(backgroundPlaylist).where(eq(backgroundPlaylist.id, id));
+    this.playlistItems.delete(id);
   }
 
   async deletePlaylistItems(ids: string[]): Promise<void> {
-    if (ids.length === 0) return;
-    await db.delete(backgroundPlaylist).where(inArray(backgroundPlaylist.id, ids));
+    for (const id of ids) {
+      this.playlistItems.delete(id);
+    }
   }
 
   async deleteAllPlaylistItems(): Promise<void> {
-    await db.delete(backgroundPlaylist);
+    this.playlistItems.clear();
   }
 
   // Video Insights
   async getVideoInsights(): Promise<VideoInsight[]> {
-    return await db.select().from(videoInsights).orderBy(desc(videoInsights.analyzedAt));
+    return Array.from(this.videoInsights.values());
   }
 
   async getVideoInsight(videoId: string): Promise<VideoInsight | undefined> {
-    const [insight] = await db.select().from(videoInsights).where(eq(videoInsights.videoId, videoId));
-    return insight || undefined;
+    return Array.from(this.videoInsights.values()).find(i => i.videoId === videoId);
   }
 
   async createVideoInsight(insight: InsertVideoInsight): Promise<VideoInsight> {
-    // Check for existing insight for this videoId
-    const [existing] = await db.select().from(videoInsights).where(eq(videoInsights.videoId, insight.videoId));
+    const existing = Array.from(this.videoInsights.values()).find(i => i.videoId === insight.videoId);
     if (existing) {
-      const [updated] = await db
-        .update(videoInsights)
-        .set({ ...insight, analyzedAt: new Date() })
-        .where(eq(videoInsights.videoId, insight.videoId))
-        .returning();
+      const updated: VideoInsight = {
+        ...existing,
+        contentType: insight.contentType || existing.contentType,
+        stance: insight.stance || existing.stance,
+        stanceProbabilities: insight.stanceProbabilities || existing.stanceProbabilities,
+        isPolitical: insight.isPolitical ?? existing.isPolitical,
+        topics: insight.topics || existing.topics,
+        sentiment: insight.sentiment || existing.sentiment,
+        geminiModel: insight.geminiModel || existing.geminiModel,
+        transcriptUsed: insight.transcriptUsed ?? existing.transcriptUsed,
+        analyzedAt: new Date(),
+      };
+      this.videoInsights.set(existing.id, updated);
       return updated;
     }
-    const [newInsight] = await db.insert(videoInsights).values(insight).returning();
+    
+    const newInsight: VideoInsight = {
+      id: generateId(),
+      videoId: insight.videoId,
+      contentType: insight.contentType || null,
+      stance: insight.stance || null,
+      stanceProbabilities: insight.stanceProbabilities || null,
+      isPolitical: insight.isPolitical ?? false,
+      topics: insight.topics || null,
+      sentiment: insight.sentiment || null,
+      geminiModel: insight.geminiModel || null,
+      transcriptUsed: insight.transcriptUsed ?? false,
+      analyzedAt: new Date(),
+    };
+    this.videoInsights.set(newInsight.id, newInsight);
     return newInsight;
   }
 
   async createVideoInsights(insights: InsertVideoInsight[]): Promise<VideoInsight[]> {
     const results: VideoInsight[] = [];
-    for (const i of insights) {
-      const result = await this.createVideoInsight(i);
+    for (const insight of insights) {
+      const result = await this.createVideoInsight(insight);
       results.push(result);
     }
     return results;
   }
 
   async deleteAllVideoInsights(): Promise<void> {
-    await db.delete(videoInsights);
+    this.videoInsights.clear();
   }
 
   // Stats
   async getStats(): Promise<DashboardStats> {
     const latestAnalysis = await this.getLatestAnalysis();
     
-    const [videoCount] = await db.select({ count: sql<number>`count(*)` }).from(videos);
-    const [recCount] = await db.select({ count: sql<number>`count(*)` }).from(recommendations);
-    const [snapCount] = await db.select({ count: sql<number>`count(*)` }).from(snapshots);
-    
     return {
-      totalVideosAnalyzed: Number(videoCount?.count ?? 0),
+      totalVideosAnalyzed: this.videos.size,
       biasScore: latestAnalysis?.biasScore ?? 50,
-      recommendationsGiven: Number(recCount?.count ?? 0),
-      snapshotsSaved: Number(snapCount?.count ?? 0),
+      recommendationsGiven: this.recommendations.size,
+      snapshotsSaved: this.snapshots.size,
     };
   }
 
   // Data export
   async exportAllData(): Promise<object> {
-    const [
-      allVideos,
-      allSubs,
-      allSnapshots,
-      allAnalysis,
-      allRecs,
-      allPlaylist,
-      allInsights
-    ] = await Promise.all([
-      this.getVideos(),
-      this.getSubscriptions(),
-      this.getSnapshots(),
-      db.select().from(analysisResults),
-      this.getRecommendations(),
-      this.getPlaylistItems(),
-      this.getVideoInsights()
-    ]);
-
     return {
-      videos: allVideos,
-      subscriptions: allSubs,
-      snapshots: allSnapshots,
-      analysis: allAnalysis,
-      recommendations: allRecs,
-      playlist: allPlaylist,
-      videoInsights: allInsights,
+      videos: await this.getVideos(),
+      subscriptions: await this.getSubscriptions(),
+      snapshots: await this.getSnapshots(),
+      analysis: this.analysisResults,
+      recommendations: await this.getRecommendations(),
+      playlist: await this.getPlaylistItems(),
+      videoInsights: await this.getVideoInsights(),
       exportedAt: new Date().toISOString(),
     };
   }
@@ -405,4 +481,4 @@ export class DatabaseStorage implements IStorage {
   }
 }
 
-export const storage = new DatabaseStorage();
+export const storage = new MemStorage();
