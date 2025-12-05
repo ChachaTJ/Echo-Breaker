@@ -201,6 +201,19 @@ EchoBreaker is a web application + Chrome extension system designed to help user
   - Connection lines between related videos (same cluster)
   - Graceful WebGL fallback for unsupported environments
   - API endpoint: `GET /api/analysis/constellation`
+  - **NEW: Similarity-based Hover Effects**
+    - Cosine similarity matrix calculated from TF-IDF embeddings
+    - Hovering over a bubble highlights similar videos with gradient opacity
+    - Dissimilar videos fade to 20% opacity, similar videos stay bright
+    - Creates visual "constellation" effect showing content relationships
+  - **NEW: AI Pattern Analysis with Gemini**
+    - Gemini 2.5 Flash analyzes viewing patterns
+    - Echo chamber risk assessment (low/medium/high)
+    - Diversity score (0-100) based on content variety
+    - AI-generated content classifications with color coding
+    - Dominant themes and blind spots identification
+    - Personalized recommendations for diversifying content
+    - API endpoint: `POST /api/analysis/constellation-insights`
 - **NEW: Developer Test Mode**
   - Toggle in Settings > Developer Mode to enable constellation test mode
   - Shows sample data (24 mock videos in 6 clusters) when enabled

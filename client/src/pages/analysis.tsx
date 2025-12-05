@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { BarChart3, RefreshCw, AlertTriangle, TrendingUp, Sparkles, FlaskConical, Gauge, Eye, PlayCircle } from "lucide-react";
+import { BarChart3, RefreshCw, AlertTriangle, TrendingUp, Sparkles, FlaskConical, Gauge, Eye, PlayCircle, Brain, Shield, Lightbulb } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -14,6 +14,24 @@ import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from "recharts";
 import type { AnalysisResult, Video, CategoryDistribution, StanceBreakdown } from "@shared/schema";
+
+interface AIClassification {
+  category: string;
+  color: string;
+  percentage: number;
+  description: string;
+}
+
+interface AIInsights {
+  viewingPatternSummary: string;
+  echoChamberRisk: 'low' | 'medium' | 'high';
+  echoChamberExplanation: string;
+  dominantThemes: string[];
+  blindSpots: string[];
+  diversityScore: number;
+  aiClassifications: AIClassification[];
+  recommendations: string[];
+}
 
 interface ConstellationData {
   videos: Array<{
@@ -33,6 +51,8 @@ interface ConstellationData {
     name: string;
     color: string;
   }>;
+  similarityMatrix?: number[][];
+  embeddings?: number[][];
 }
 
 // Stance colors for visualization
@@ -176,8 +196,35 @@ export default function Analysis() {
     enabled: !testMode && (videos?.length || 0) >= 3,
   });
   
+  // AI insights state
+  const [aiInsights, setAiInsights] = useState<AIInsights | null>(null);
+  const [insightsLoading, setInsightsLoading] = useState(false);
+  
   // Use mock data in test mode, otherwise use real data
   const displayConstellationData = testMode ? mockData : constellationData;
+
+  // Fetch AI insights
+  const fetchAIInsights = async () => {
+    setInsightsLoading(true);
+    try {
+      const response = await apiRequest('POST', '/api/analysis/constellation-insights');
+      const data = await response.json();
+      if (data.insights) {
+        setAiInsights(data.insights);
+      } else if (data.fallback) {
+        setAiInsights(data.fallback);
+      }
+    } catch (error) {
+      console.error('Failed to fetch AI insights:', error);
+      toast({
+        title: "AI 분석 실패",
+        description: "AI 인사이트를 가져오는데 실패했습니다.",
+        variant: "destructive",
+      });
+    } finally {
+      setInsightsLoading(false);
+    }
+  };
 
   const runAnalysisMutation = useMutation({
     mutationFn: () => apiRequest('POST', '/api/analysis/run'),
@@ -386,6 +433,8 @@ export default function Analysis() {
                   <VideoConstellation
                     videos={displayConstellationData.videos}
                     clusters={displayConstellationData.clusters}
+                    similarityMatrix={displayConstellationData.similarityMatrix}
+                    aiClassifications={aiInsights?.aiClassifications}
                   />
                 </div>
               ) : (
@@ -393,6 +442,156 @@ export default function Analysis() {
                   <Sparkles className="h-12 w-12 mb-4 opacity-50" />
                   <p>Collect more videos to see the filter bubble</p>
                   <p className="text-sm mt-1">At least 3 videos are needed</p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* AI Insights Panel */}
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between gap-4 flex-wrap">
+                <div>
+                  <CardTitle className="flex items-center gap-2">
+                    <Brain className="h-5 w-5" />
+                    AI 시청 패턴 분석
+                  </CardTitle>
+                  <CardDescription>
+                    Gemini AI가 분석한 당신의 시청 패턴과 에코 체임버 위험도
+                  </CardDescription>
+                </div>
+                <Button
+                  onClick={fetchAIInsights}
+                  disabled={insightsLoading || (videos?.length || 0) < 3}
+                  className="gap-2"
+                  data-testid="button-fetch-ai-insights"
+                >
+                  <Brain className={`h-4 w-4 ${insightsLoading ? 'animate-pulse' : ''}`} />
+                  {insightsLoading ? 'AI 분석 중...' : 'AI 분석 실행'}
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {insightsLoading ? (
+                <div className="space-y-4">
+                  <Skeleton className="h-20 w-full" />
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <Skeleton className="h-32 w-full" />
+                    <Skeleton className="h-32 w-full" />
+                  </div>
+                </div>
+              ) : aiInsights ? (
+                <div className="space-y-6">
+                  {/* Pattern Summary */}
+                  <div className="p-4 rounded-lg bg-muted/50">
+                    <p className="text-sm leading-relaxed">{aiInsights.viewingPatternSummary}</p>
+                  </div>
+
+                  {/* Echo Chamber Risk & Diversity Score */}
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div className="p-4 rounded-lg border">
+                      <div className="flex items-center gap-2 mb-2">
+                        <Shield className="h-4 w-4" />
+                        <span className="font-medium">에코 체임버 위험도</span>
+                      </div>
+                      <div className="flex items-center gap-2 mb-2">
+                        <Badge 
+                          variant={aiInsights.echoChamberRisk === 'high' ? 'destructive' : aiInsights.echoChamberRisk === 'medium' ? 'default' : 'secondary'}
+                          className="text-sm"
+                        >
+                          {aiInsights.echoChamberRisk === 'high' ? '높음' : aiInsights.echoChamberRisk === 'medium' ? '중간' : '낮음'}
+                        </Badge>
+                      </div>
+                      <p className="text-sm text-muted-foreground">{aiInsights.echoChamberExplanation}</p>
+                    </div>
+
+                    <div className="p-4 rounded-lg border">
+                      <div className="flex items-center gap-2 mb-2">
+                        <Gauge className="h-4 w-4" />
+                        <span className="font-medium">다양성 점수</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-3xl font-bold">{aiInsights.diversityScore}</span>
+                        <span className="text-muted-foreground">/100</span>
+                      </div>
+                      <Progress value={aiInsights.diversityScore} className="mt-2 h-2" />
+                    </div>
+                  </div>
+
+                  {/* AI Classifications */}
+                  {aiInsights.aiClassifications && aiInsights.aiClassifications.length > 0 && (
+                    <div>
+                      <h4 className="font-medium mb-3 flex items-center gap-2">
+                        <Sparkles className="h-4 w-4" />
+                        AI 분류 카테고리
+                      </h4>
+                      <div className="space-y-2">
+                        {aiInsights.aiClassifications.map((cat, i) => (
+                          <div key={i} className="flex items-center gap-3">
+                            <div 
+                              className="w-3 h-3 rounded-full flex-shrink-0"
+                              style={{ backgroundColor: cat.color }}
+                            />
+                            <span className="text-sm font-medium min-w-[100px]">{cat.category}</span>
+                            <div className="flex-1">
+                              <Progress value={cat.percentage} className="h-2" />
+                            </div>
+                            <span className="text-sm text-muted-foreground min-w-[60px] text-right">
+                              {cat.percentage}%
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Dominant Themes & Blind Spots */}
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div>
+                      <h4 className="font-medium mb-2 flex items-center gap-2">
+                        <TrendingUp className="h-4 w-4" />
+                        주요 테마
+                      </h4>
+                      <div className="flex flex-wrap gap-2">
+                        {aiInsights.dominantThemes.map((theme, i) => (
+                          <Badge key={i} variant="outline">{theme}</Badge>
+                        ))}
+                      </div>
+                    </div>
+                    <div>
+                      <h4 className="font-medium mb-2 flex items-center gap-2">
+                        <AlertTriangle className="h-4 w-4 text-orange-500" />
+                        시청하지 않는 분야
+                      </h4>
+                      <div className="flex flex-wrap gap-2">
+                        {aiInsights.blindSpots.map((spot, i) => (
+                          <Badge key={i} variant="secondary" className="opacity-70">{spot}</Badge>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Recommendations */}
+                  <div className="p-4 rounded-lg bg-primary/5 border border-primary/20">
+                    <h4 className="font-medium mb-2 flex items-center gap-2">
+                      <Lightbulb className="h-4 w-4 text-primary" />
+                      AI 추천
+                    </h4>
+                    <ul className="space-y-1 text-sm text-muted-foreground">
+                      {aiInsights.recommendations.map((rec, i) => (
+                        <li key={i} className="flex items-start gap-2">
+                          <span className="text-primary">•</span>
+                          {rec}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex flex-col items-center justify-center py-8 text-center text-muted-foreground">
+                  <Brain className="h-12 w-12 mb-4 opacity-30" />
+                  <p>AI 분석을 실행하여 시청 패턴 인사이트를 확인하세요</p>
+                  <p className="text-sm mt-1">최소 3개의 영상이 필요합니다</p>
                 </div>
               )}
             </CardContent>

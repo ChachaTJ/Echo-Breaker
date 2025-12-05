@@ -18,9 +18,18 @@ interface VideoNode {
   significanceWeight?: number;
 }
 
+interface AIClassification {
+  category: string;
+  color: string;
+  percentage: number;
+  description: string;
+}
+
 interface VideoConstellationProps {
   videos: VideoNode[];
   clusters: { id: number; name: string; color: string }[];
+  similarityMatrix?: number[][];
+  aiClassifications?: AIClassification[];
   onNodeClick?: (video: VideoNode) => void;
 }
 
@@ -122,7 +131,7 @@ const bubbleFragmentShader = `
   }
 `;
 
-export function VideoConstellation({ videos, clusters, onNodeClick }: VideoConstellationProps) {
+export function VideoConstellation({ videos, clusters, similarityMatrix, aiClassifications, onNodeClick }: VideoConstellationProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
@@ -135,11 +144,19 @@ export function VideoConstellation({ videos, clusters, onNodeClick }: VideoConst
   const textureLoaderRef = useRef<THREE.TextureLoader | null>(null);
   const materialsRef = useRef<THREE.ShaderMaterial[]>([]);
   const timeRef = useRef<number>(0);
+  const videoIndexMapRef = useRef<Map<string, number>>(new Map());
   
   const [selectedNode, setSelectedNode] = useState<VideoNode | null>(null);
   const [isPlaying, setIsPlaying] = useState(true);
   const [hoveredNode, setHoveredNode] = useState<VideoNode | null>(null);
   const [webglError, setWebglError] = useState<string | null>(null);
+  
+  // Build video index map for similarity lookup
+  useEffect(() => {
+    const map = new Map<string, number>();
+    videos.forEach((v, i) => map.set(v.id, i));
+    videoIndexMapRef.current = map;
+  }, [videos]);
 
   // Create bubble material with thumbnail texture
   const createBubbleMaterial = useCallback((thumbnailUrl: string, clusterColor: string) => {
@@ -550,6 +567,61 @@ export function VideoConstellation({ videos, clusters, onNodeClick }: VideoConst
       });
     });
   }, [videos, createBubbleMaterial, createOutlineRing, createInnerRing]);
+
+  // Similarity-based hover highlighting effect
+  useEffect(() => {
+    if (!hoveredNode || !similarityMatrix) {
+      // Reset all nodes to full opacity when not hovering
+      nodesRef.current.forEach((mesh) => {
+        if (mesh.material instanceof THREE.ShaderMaterial) {
+          mesh.material.opacity = 1.0;
+          mesh.material.needsUpdate = true;
+        }
+      });
+      outlineRingsRef.current.forEach((ring) => {
+        if (ring.material instanceof THREE.LineBasicMaterial) {
+          ring.material.opacity = ring.userData.isInner ? 0.6 : 0.9;
+          ring.material.needsUpdate = true;
+        }
+      });
+      return;
+    }
+
+    const hoveredIndex = videoIndexMapRef.current.get(hoveredNode.id);
+    if (hoveredIndex === undefined) return;
+
+    // Update opacity based on similarity
+    nodesRef.current.forEach((mesh, nodeId) => {
+      const nodeIndex = videoIndexMapRef.current.get(nodeId);
+      if (nodeIndex === undefined) return;
+
+      const similarity = similarityMatrix[hoveredIndex]?.[nodeIndex] ?? 0;
+      
+      // Map similarity to opacity: 0.2 (dissimilar) to 1.0 (similar)
+      const opacity = Math.max(0.2, similarity);
+      
+      if (mesh.material instanceof THREE.ShaderMaterial) {
+        mesh.material.opacity = opacity;
+        mesh.material.needsUpdate = true;
+      }
+    });
+
+    // Update outline rings similarly
+    outlineRingsRef.current.forEach((ring) => {
+      const nodeId = ring.userData.nodeId;
+      const nodeIndex = videoIndexMapRef.current.get(nodeId);
+      if (nodeIndex === undefined) return;
+
+      const similarity = similarityMatrix[hoveredIndex]?.[nodeIndex] ?? 0;
+      const baseOpacity = ring.userData.isInner ? 0.6 : 0.9;
+      const opacity = Math.max(0.15, similarity * baseOpacity);
+
+      if (ring.material instanceof THREE.LineBasicMaterial) {
+        ring.material.opacity = opacity;
+        ring.material.needsUpdate = true;
+      }
+    });
+  }, [hoveredNode, similarityMatrix]);
 
   // Controls
   const toggleAutoRotate = () => {

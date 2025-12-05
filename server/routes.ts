@@ -1390,13 +1390,198 @@ Respond in JSON format:
         ][i % 10]
       }));
 
-      res.json({ videos: videoNodes, clusters });
+      // Calculate cosine similarity matrix for hover effects
+      const similarityMatrix: number[][] = embeddings.map((emb1, i) => {
+        return embeddings.map((emb2, j) => {
+          if (i === j) return 1.0;
+          const dotProduct = emb1.reduce((sum, val, k) => sum + val * emb2[k], 0);
+          const norm1 = Math.sqrt(emb1.reduce((sum, val) => sum + val * val, 0));
+          const norm2 = Math.sqrt(emb2.reduce((sum, val) => sum + val * val, 0));
+          return norm1 && norm2 ? dotProduct / (norm1 * norm2) : 0;
+        });
+      });
+
+      res.json({ 
+        videos: videoNodes, 
+        clusters,
+        similarityMatrix,
+        embeddings: embeddings.map(e => e.slice(0, 10)) // First 10 dims for frontend
+      });
 
     } catch (error) {
       console.error("Constellation generation error:", error);
       res.status(500).json({ error: "Failed to generate constellation" });
     }
   });
+
+  // AI-powered constellation pattern analysis endpoint
+  app.post("/api/analysis/constellation-insights", async (req, res) => {
+    try {
+      const videos = await storage.getVideos();
+      
+      if (videos.length < 3) {
+        return res.status(400).json({ 
+          error: "Need at least 3 videos for analysis"
+        });
+      }
+
+      const geminiClient = getGeminiClient();
+      if (!geminiClient) {
+        return res.status(503).json({ 
+          error: "Gemini AI not available",
+          fallback: generateFallbackInsights(videos)
+        });
+      }
+
+      // Create video summary for Gemini analysis
+      const videoSummary = videos.slice(0, 50).map((v, i) => 
+        `${i + 1}. "${v.title}" by ${v.channelName} (${v.category || 'Unknown'})`
+      ).join('\n');
+
+      // Get cluster distribution
+      const categoryCount: Record<string, number> = {};
+      const channelCount: Record<string, number> = {};
+      videos.forEach(v => {
+        const cat = v.category || 'Unknown';
+        categoryCount[cat] = (categoryCount[cat] || 0) + 1;
+        channelCount[v.channelName] = (channelCount[v.channelName] || 0) + 1;
+      });
+
+      const topCategories = Object.entries(categoryCount)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 5)
+        .map(([name, count]) => `${name}: ${count}개`);
+
+      const topChannels = Object.entries(channelCount)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 5)
+        .map(([name, count]) => `${name}: ${count}개`);
+
+      const prompt = `당신은 YouTube 시청 패턴 분석 전문가입니다.
+사용자의 시청 데이터를 분석하여 에코 체임버(Echo Chamber) 관점에서 인사이트를 제공하세요.
+
+## 분석할 데이터
+
+### 수집된 영상 목록 (총 ${videos.length}개):
+${videoSummary}
+
+### 카테고리 분포:
+${topCategories.join(', ')}
+
+### 주요 채널:
+${topChannels.join(', ')}
+
+## 분석 요청
+
+다음 JSON 형식으로 응답하세요:
+{
+  "viewingPatternSummary": "사용자의 시청 패턴을 2-3문장으로 요약 (한국어)",
+  "echoChamberRisk": "low" | "medium" | "high",
+  "echoChamberExplanation": "에코 체임버 위험도에 대한 설명 (한국어)",
+  "dominantThemes": ["주요 테마 1", "주요 테마 2", "주요 테마 3"],
+  "blindSpots": ["시청하지 않는 주제 1", "시청하지 않는 주제 2"],
+  "diversityScore": 0-100,
+  "aiClassifications": [
+    {"category": "기술/IT", "color": "#4ECDC4", "percentage": 30, "description": "설명"},
+    {"category": "정치/시사", "color": "#FF6B6B", "percentage": 20, "description": "설명"}
+  ],
+  "recommendations": ["다양성을 위한 추천 1", "추천 2"]
+}
+
+주의: 반드시 유효한 JSON만 출력하세요. 마크다운 코드 블록 없이 순수 JSON만 출력하세요.`;
+
+      const model = geminiClient.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        config: {
+          temperature: 0.3,
+          maxOutputTokens: 2000,
+        }
+      });
+
+      const response = await model;
+      const text = response.text || '';
+      
+      // Parse JSON from response
+      let insights;
+      try {
+        // Try to extract JSON from the response
+        const jsonMatch = text.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          insights = JSON.parse(jsonMatch[0]);
+        } else {
+          throw new Error('No JSON found in response');
+        }
+      } catch (parseError) {
+        console.error('Failed to parse Gemini response:', text);
+        insights = generateFallbackInsights(videos);
+      }
+
+      res.json({
+        success: true,
+        insights,
+        generatedAt: new Date().toISOString()
+      });
+
+    } catch (error) {
+      console.error("Constellation insights error:", error);
+      res.status(500).json({ 
+        error: "Failed to generate insights",
+        fallback: generateFallbackInsights(await storage.getVideos())
+      });
+    }
+  });
+
+  // Helper function for fallback insights
+  function generateFallbackInsights(videos: Video[]) {
+    const categoryCount: Record<string, number> = {};
+    const channelCount: Record<string, number> = {};
+    
+    videos.forEach(v => {
+      const cat = v.category || 'Unknown';
+      categoryCount[cat] = (categoryCount[cat] || 0) + 1;
+      channelCount[v.channelName] = (channelCount[v.channelName] || 0) + 1;
+    });
+
+    const topCategories = Object.entries(categoryCount)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5);
+
+    const uniqueChannels = Object.keys(channelCount).length;
+    const diversityScore = Math.min(100, Math.round((uniqueChannels / videos.length) * 100 + (topCategories.length * 10)));
+
+    const categoryColors: Record<string, string> = {
+      'Technology': '#4ECDC4',
+      'Entertainment': '#FF6B6B',
+      'Education': '#45B7D1',
+      'News': '#F7DC6F',
+      'Gaming': '#BB8FCE',
+      'Music': '#DDA0DD',
+      'Sports': '#96CEB4',
+      'Unknown': '#9CA3AF',
+    };
+
+    return {
+      viewingPatternSummary: `${videos.length}개의 영상이 수집되었으며, ${uniqueChannels}개의 고유 채널에서 시청했습니다. 주요 관심 분야는 ${topCategories.slice(0, 2).map(c => c[0]).join(', ')}입니다.`,
+      echoChamberRisk: uniqueChannels < 5 ? 'high' : uniqueChannels < 10 ? 'medium' : 'low',
+      echoChamberExplanation: uniqueChannels < 5 
+        ? '제한된 채널에서만 콘텐츠를 소비하고 있어 에코 체임버 위험이 높습니다.'
+        : '다양한 채널에서 콘텐츠를 소비하고 있습니다.',
+      dominantThemes: topCategories.slice(0, 3).map(c => c[0]),
+      blindSpots: ['다큐멘터리', '외국어 콘텐츠', '다른 관점의 뉴스'],
+      diversityScore,
+      aiClassifications: topCategories.map(([category, count]) => ({
+        category,
+        color: categoryColors[category] || '#9CA3AF',
+        percentage: Math.round((count / videos.length) * 100),
+        description: `${count}개 영상`
+      })),
+      recommendations: [
+        '다른 관점의 채널을 구독해 보세요',
+        '새로운 카테고리의 콘텐츠를 탐색해 보세요'
+      ]
+    };
+  }
 
   // Recommendations endpoints
   app.get("/api/recommendations", async (req, res) => {
