@@ -1091,132 +1091,26 @@
   }
 
   // Collect both regular videos and shorts from home page
+  // Uses Self-Healing Scraper with AI-powered selector discovery
   async function collectHomePageContent() {
-    const videos = [];
-    const shorts = [];
-    const pageType = 'home';
-    
     // Check if shorts collection is enabled
     const stored = await chrome.storage.local.get(['collectShorts']);
     const collectShortsEnabled = stored.collectShorts !== false;
     
-    // Get all content items from home page - Try multiple selectors
-    let allEls = Array.from(document.querySelectorAll('ytd-rich-item-renderer, ytd-video-renderer, ytd-reel-item-renderer'));
+    // Use Self-Healing Crawl for home page
+    const result = await selfHealingCrawl('home');
     
-    // Log DOM element counts for debugging
-    const domStats = {
-      richItemRenderer: document.querySelectorAll('ytd-rich-item-renderer').length,
-      videoRenderer: document.querySelectorAll('ytd-video-renderer').length,
-      videoTitle: document.querySelectorAll('#video-title').length,
-      thumbnail: document.querySelectorAll('a#thumbnail').length,
-      totalElements: allEls.length
-    };
-    
-    await log('info', `홈 페이지 DOM 분석`, domStats);
-    
-    // If no elements found with default selectors, use AI extraction
-    if (allEls.length === 0) {
-      await log('warning', `기본 셀렉터 실패 - AI 추출 시작`);
-      const aiVideos = await extractVideosWithAI(pageType);
-      if (aiVideos.length > 0) {
-        await log('success', `AI 추출 성공`, { count: aiVideos.length });
-        // Convert AI extracted videos to our format
-        for (const v of aiVideos) {
-          if (v.isShort && collectShortsEnabled) {
-            shorts.push({
-              videoId: v.videoId,
-              title: v.title,
-              channelName: v.channelName,
-              thumbnail: v.thumbnail,
-              sourcePhase: 'shorts',
-              collectedAt: new Date().toISOString()
-            });
-          } else if (!v.isShort) {
-            videos.push({
-              videoId: v.videoId,
-              title: v.title,
-              channelName: v.channelName,
-              thumbnail: v.thumbnail,
-              sourcePhase: 'home_feed',
-              collectedAt: new Date().toISOString()
-            });
-          }
-        }
-        return { videos, shorts };
-      }
+    // Filter shorts if disabled
+    if (!collectShortsEnabled) {
+      result.shorts = [];
     }
-
-    for (let i = 0; i < Math.min(allEls.length, CONFIG.MAX_VIDEOS * 2); i++) {
-      const el = allEls[i];
-      try {
-        // Check if this is a Short
-        const isShorts = el.tagName.toLowerCase() === 'ytd-reel-item-renderer' ||
-                         el.querySelector('ytd-rich-grid-slim-media') !== null ||
-                         el.querySelector('[is-shorts]') !== null;
-        
-        // Also check for shorts shelf containers
-        const closestShelf = el.closest('ytd-rich-shelf-renderer');
-        const isInShortsShelf = closestShelf && closestShelf.querySelector('[is-shorts]');
-        
-        if (isShorts || isInShortsShelf) {
-          // Only collect shorts if enabled
-          if (collectShortsEnabled) {
-            const shortData = await extractShortFromElement(el);
-            if (shortData) {
-              shorts.push(shortData);
-            }
-          }
-        } else {
-          // Collect as regular Video
-          const videoData = await extractVideoFromElement(el);
-          if (videoData) {
-            videos.push(videoData);
-          }
-        }
-      } catch (e) {
-        console.log('[EchoBreaker] Error processing element:', e.message);
-      }
-    }
-
-    // Log extraction results
-    await log('info', `추출 결과`, {
-      elements: allEls.length,
-      videos: videos.length,
-      shorts: shorts.length
+    
+    console.log('[EchoBreaker] Collected from home:', { 
+      videos: result.videos.length, 
+      shorts: result.shorts.length 
     });
-
-    // If we found elements but couldn't extract any videos, try AI extraction
-    if (allEls.length > 0 && videos.length === 0) {
-      await log('warning', `요소 ${allEls.length}개 발견했지만 추출 실패 - AI 추출 시작`);
-      const aiVideos = await extractVideosWithAI(pageType);
-      if (aiVideos.length > 0) {
-        await log('success', `AI 폴백 추출 성공`, { count: aiVideos.length });
-        for (const v of aiVideos) {
-          if (v.isShort && collectShortsEnabled) {
-            shorts.push({
-              videoId: v.videoId,
-              title: v.title,
-              channelName: v.channelName,
-              thumbnail: v.thumbnail,
-              sourcePhase: 'shorts',
-              collectedAt: new Date().toISOString()
-            });
-          } else if (!v.isShort) {
-            videos.push({
-              videoId: v.videoId,
-              title: v.title,
-              channelName: v.channelName,
-              thumbnail: v.thumbnail,
-              sourcePhase: 'home_feed',
-              collectedAt: new Date().toISOString()
-            });
-          }
-        }
-      }
-    }
-
-    console.log('[EchoBreaker] Collected from home:', { videos: videos.length, shorts: shorts.length });
-    return { videos, shorts };
+    
+    return result;
   }
   
   // Extract short data from a DOM element - YouTube December 2024 DOM structure

@@ -258,6 +258,67 @@ export async function registerRoutes(
     }
   });
 
+  // Self-Healing Scraper: AI Selector Analysis endpoint
+  app.post("/api/analyze-selectors", async (req, res) => {
+    try {
+      const { htmlSnippet, pageType } = req.body;
+      
+      if (!htmlSnippet || typeof htmlSnippet !== 'string') {
+        return res.status(400).json({ error: "htmlSnippet required" });
+      }
+      
+      const geminiClient = getGeminiClient();
+      if (!geminiClient) {
+        return res.status(503).json({ error: "Gemini AI not available" });
+      }
+      
+      const prompt = `You are a web scraping expert. Analyze this YouTube HTML snippet and find the CSS selectors for extracting video data.
+
+HTML Snippet:
+${htmlSnippet}
+
+Find the most specific CSS selectors for:
+1. "titleSelector": The video title text (look for h3, title attributes, or yt-core-attributed-string)
+2. "channelSelector": The channel name (look for subtitle or channel-related elements)
+3. "videoIdSelector": Element containing video ID (look for content-id-* class or href with /watch?v=)
+4. "metaSelector": View count and upload date metadata
+
+Rules:
+- Prefer specific classes over generic ones like "style-scope"
+- Prefer ID selectors like "#video-title" if available
+- Look for unique class patterns like "yt-lockup-metadata-view-model__*"
+- The selectors must work with querySelector()
+
+Return ONLY a valid JSON object with these keys: titleSelector, channelSelector, videoIdSelector, metaSelector
+No markdown, no explanations - just the JSON object.`;
+
+      const response = await geminiClient.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: prompt
+      });
+      
+      const text = response.text || '';
+      
+      // Clean up response (remove markdown if present)
+      let jsonStr = text.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+      
+      // Try to extract JSON if wrapped in other text
+      const jsonMatch = jsonStr.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        jsonStr = jsonMatch[0];
+      }
+      
+      const selectors = JSON.parse(jsonStr);
+      
+      console.log(`[AI Selectors] Analyzed for ${pageType}:`, selectors);
+      
+      res.json({ selectors, pageType });
+    } catch (error) {
+      console.error('Failed to analyze selectors:', error);
+      res.status(500).json({ error: "Failed to analyze HTML selectors" });
+    }
+  });
+
   // Videos endpoints
   app.get("/api/videos", async (req, res) => {
     try {
