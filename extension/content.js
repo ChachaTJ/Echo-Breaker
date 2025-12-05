@@ -686,6 +686,8 @@
           viewCountText: viewCountText,
           duration: durationEl?.textContent?.trim() || null,
           source: 'sidebar_recommendation',
+          sourcePhase: 'recommended',  // Sidebar recommendations
+          significanceWeight: 35,      // Lower weight than watched videos
           collectedAt: new Date().toISOString()
         });
       } catch (e) {

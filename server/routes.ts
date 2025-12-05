@@ -406,9 +406,14 @@ export async function registerRoutes(
       }
       
       if (data.recommendedVideos && data.recommendedVideos.length > 0) {
-        // Store recommended videos as regular videos for analysis
-        // (These are what YouTube is suggesting - important for detecting echo chamber)
-        await storage.createVideos(data.recommendedVideos);
+        // Store recommended videos - important for detecting echo chamber
+        // These are YouTube's sidebar recommendations that reinforce viewing patterns
+        const recommendedAsVideos = data.recommendedVideos.map((v: any) => ({
+          ...v,
+          sourcePhase: v.sourcePhase || 'recommended',
+          significanceWeight: v.significanceWeight ?? 35, // Lower weight than watched videos
+        }));
+        await storage.createVideos(recommendedAsVideos);
         results.recommended = data.recommendedVideos.length;
         
         // Log collection

@@ -127,6 +127,29 @@ export class MemStorage implements IStorage {
   }
 
   async createVideo(video: InsertVideo): Promise<Video> {
+    // Check for duplicate by videoId - update existing instead of creating new
+    const existingVideo = Array.from(this.videos.values()).find(v => v.videoId === video.videoId);
+    
+    if (existingVideo) {
+      // Update existing video with new data if source has higher significance
+      const newSignificance = video.significanceWeight ?? 50;
+      const existingSignificance = existingVideo.significanceWeight ?? 50;
+      
+      // Only update if new source is more significant (e.g., watched > recommended)
+      if (newSignificance > existingSignificance) {
+        const updatedVideo: Video = {
+          ...existingVideo,
+          sourcePhase: (video.sourcePhase || existingVideo.sourcePhase) as Video['sourcePhase'],
+          significanceWeight: newSignificance,
+          collectedAt: new Date(), // Update timestamp
+        };
+        this.videos.set(existingVideo.id, updatedVideo);
+        return updatedVideo;
+      }
+      return existingVideo; // Return existing without update
+    }
+    
+    // Create new video
     const id = randomUUID();
     const newVideo: Video = { 
       ...video, 
@@ -146,7 +169,12 @@ export class MemStorage implements IStorage {
   }
 
   async createVideos(videos: InsertVideo[]): Promise<Video[]> {
-    return Promise.all(videos.map(v => this.createVideo(v)));
+    const results: Video[] = [];
+    for (const v of videos) {
+      const result = await this.createVideo(v);
+      results.push(result);
+    }
+    return results;
   }
 
   async deleteAllVideos(): Promise<void> {
