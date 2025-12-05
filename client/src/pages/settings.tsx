@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Settings as SettingsIcon, Download, Trash2, Moon, Sun, Monitor, Cpu, RefreshCw, Wifi, WifiOff, Activity, Video, Users, ThumbsUp } from "lucide-react";
+import { Settings as SettingsIcon, Download, Trash2, Moon, Sun, Monitor, Cpu, RefreshCw, Wifi, WifiOff, Activity, Video, Users, ThumbsUp, Clock, Eye, ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
@@ -76,6 +76,26 @@ export default function Settings() {
   const { data: collectionData, refetch: refetchCollection } = useQuery<CollectionData>({
     queryKey: ['/api/collection/logs'],
     refetchInterval: 15000, // Refresh every 15 seconds
+  });
+
+  // Recent collected videos with full details
+  interface RecentVideo {
+    id: string;
+    videoId: string;
+    title: string;
+    channelName: string;
+    channelId: string | null;
+    thumbnailUrl: string;
+    viewCount: number | null;
+    viewCountText: string | null;
+    duration: string | null;
+    uploadTime: string | null;
+    source: string;
+    collectedAt: string;
+  }
+  const { data: recentVideos, refetch: refetchVideos } = useQuery<RecentVideo[]>({
+    queryKey: ['/api/collection/recent-videos'],
+    refetchInterval: 30000, // Refresh every 30 seconds
   });
 
   const formatTimeAgo = (dateString: string | null) => {
@@ -286,6 +306,106 @@ export default function Settings() {
                 )}
               </div>
             </div>
+          </CardContent>
+        </Card>
+
+        {/* Recently Collected Videos - YouTube-style grid */}
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <CardTitle className="flex items-center gap-2">
+                  <Video className="h-5 w-5" />
+                  Recently Collected Videos
+                </CardTitle>
+                <CardDescription>
+                  Videos detected on your YouTube feed
+                </CardDescription>
+              </div>
+              <Button 
+                variant="outline" 
+                size="icon"
+                onClick={() => refetchVideos()}
+                data-testid="button-refresh-videos"
+              >
+                <RefreshCw className="h-4 w-4" />
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent>
+            {recentVideos && recentVideos.length > 0 ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                {recentVideos.slice(0, 12).map((video) => (
+                  <a
+                    key={video.id}
+                    href={`https://www.youtube.com/watch?v=${video.videoId}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="group block rounded-md overflow-visible hover-elevate"
+                    data-testid={`card-video-${video.videoId}`}
+                  >
+                    {/* Thumbnail */}
+                    <div className="relative aspect-video rounded-md overflow-hidden bg-muted">
+                      <img
+                        src={video.thumbnailUrl}
+                        alt={video.title}
+                        className="w-full h-full object-cover"
+                        loading="lazy"
+                      />
+                      {/* Duration badge */}
+                      {video.duration && (
+                        <div className="absolute bottom-1 right-1 bg-black/80 text-white text-xs px-1 rounded">
+                          {video.duration}
+                        </div>
+                      )}
+                      {/* Source badge */}
+                      <div className="absolute top-1 left-1">
+                        <Badge 
+                          variant="secondary" 
+                          className="text-[10px] bg-black/60 text-white border-0"
+                        >
+                          {video.source === 'home_feed' ? 'Home' : 
+                           video.source === 'sidebar_recommendation' ? 'Sidebar' : 
+                           video.source}
+                        </Badge>
+                      </div>
+                    </div>
+                    
+                    {/* Video info */}
+                    <div className="pt-2 space-y-1">
+                      <h4 className="text-sm font-medium line-clamp-2 leading-tight group-hover:text-blue-500 dark:group-hover:text-blue-400">
+                        {video.title}
+                      </h4>
+                      <p className="text-xs text-muted-foreground truncate">
+                        {video.channelName}
+                      </p>
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                        {video.viewCountText && (
+                          <span className="flex items-center gap-1">
+                            <Eye className="h-3 w-3" />
+                            {video.viewCountText}
+                          </span>
+                        )}
+                        {video.uploadTime && (
+                          <span className="flex items-center gap-1">
+                            <Clock className="h-3 w-3" />
+                            {video.uploadTime}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </a>
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-8 text-muted-foreground">
+                <Video className="h-12 w-12 mx-auto mb-3 opacity-50" />
+                <p className="text-sm">No videos collected yet.</p>
+                <p className="text-xs mt-1">
+                  Browse YouTube with the extension installed to start collecting videos.
+                </p>
+              </div>
+            )}
           </CardContent>
         </Card>
 

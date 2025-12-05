@@ -139,6 +139,34 @@ export async function registerRoutes(
     });
   });
 
+  // Recent collected videos with full details (for Settings page display)
+  app.get("/api/collection/recent-videos", async (req, res) => {
+    try {
+      const limit = Math.min(parseInt(req.query.limit as string) || 20, 50);
+      const videos = await storage.getVideos();
+      
+      // Return recent videos with all details
+      const recentVideos = videos.slice(0, limit).map(v => ({
+        id: v.id,
+        videoId: v.videoId,
+        title: v.title,
+        channelName: v.channelName,
+        channelId: v.channelId,
+        thumbnailUrl: v.thumbnailUrl || `https://img.youtube.com/vi/${v.videoId}/mqdefault.jpg`,
+        viewCount: v.viewCount,
+        viewCountText: (v as any).viewCountText || null,
+        duration: (v as any).duration || null,
+        uploadTime: (v as any).uploadTime || null,
+        source: (v as any).source || 'unknown',
+        collectedAt: v.collectedAt,
+      }));
+      
+      res.json(recentVideos);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to get recent videos" });
+    }
+  });
+
   // Bulk crawl data endpoint (for Chrome extension)
   app.post("/api/crawl", async (req, res) => {
     try {
