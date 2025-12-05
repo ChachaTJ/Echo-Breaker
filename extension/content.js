@@ -1121,14 +1121,329 @@
     observeForOverlays();
   }
 
+  // ========================================
+  // AI DIVERSE RECOMMENDATIONS INJECTION
+  // Insert AI-recommended videos into YouTube DOM
+  // ========================================
+
+  // Inject styles for EchoBreaker recommendation cards
+  function injectRecommendationStyles() {
+    if (document.getElementById('echobreaker-rec-styles')) return;
+    
+    const style = document.createElement('style');
+    style.id = 'echobreaker-rec-styles';
+    style.textContent = `
+      /* EchoBreaker Recommendation Container */
+      .echobreaker-rec-container {
+        margin: 16px 0 !important;
+        padding: 16px !important;
+        background: linear-gradient(135deg, rgba(34, 197, 94, 0.1), rgba(59, 130, 246, 0.1)) !important;
+        border: 2px solid #22c55e !important;
+        border-radius: 12px !important;
+        position: relative !important;
+      }
+      
+      .echobreaker-rec-header {
+        display: flex !important;
+        align-items: center !important;
+        gap: 8px !important;
+        margin-bottom: 12px !important;
+        padding-bottom: 8px !important;
+        border-bottom: 1px solid rgba(34, 197, 94, 0.3) !important;
+      }
+      
+      .echobreaker-rec-logo {
+        width: 24px !important;
+        height: 24px !important;
+        background: linear-gradient(135deg, #22c55e, #3b82f6) !important;
+        border-radius: 50% !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        color: white !important;
+        font-weight: bold !important;
+        font-size: 14px !important;
+      }
+      
+      .echobreaker-rec-title {
+        font-size: 14px !important;
+        font-weight: 600 !important;
+        color: #22c55e !important;
+      }
+      
+      .echobreaker-rec-subtitle {
+        font-size: 11px !important;
+        color: var(--yt-spec-text-secondary, #aaa) !important;
+        margin-left: auto !important;
+      }
+      
+      /* Video Card */
+      .echobreaker-video-card {
+        display: flex !important;
+        gap: 12px !important;
+        padding: 12px !important;
+        background: var(--yt-spec-badge-chip-background, rgba(255,255,255,0.1)) !important;
+        border-radius: 8px !important;
+        margin-bottom: 8px !important;
+        cursor: pointer !important;
+        transition: all 0.2s ease !important;
+        text-decoration: none !important;
+      }
+      
+      .echobreaker-video-card:hover {
+        background: var(--yt-spec-10-percent-layer, rgba(255,255,255,0.15)) !important;
+        transform: translateX(4px) !important;
+      }
+      
+      .echobreaker-video-card:last-child {
+        margin-bottom: 0 !important;
+      }
+      
+      .echobreaker-video-thumbnail {
+        width: 120px !important;
+        min-width: 120px !important;
+        height: 68px !important;
+        border-radius: 6px !important;
+        object-fit: cover !important;
+        background: #333 !important;
+      }
+      
+      .echobreaker-video-info {
+        flex: 1 !important;
+        min-width: 0 !important;
+      }
+      
+      .echobreaker-video-title {
+        font-size: 13px !important;
+        font-weight: 500 !important;
+        color: var(--yt-spec-text-primary, #fff) !important;
+        line-height: 1.3 !important;
+        margin-bottom: 4px !important;
+        display: -webkit-box !important;
+        -webkit-line-clamp: 2 !important;
+        -webkit-box-orient: vertical !important;
+        overflow: hidden !important;
+      }
+      
+      .echobreaker-video-channel {
+        font-size: 11px !important;
+        color: var(--yt-spec-text-secondary, #aaa) !important;
+        margin-bottom: 4px !important;
+      }
+      
+      .echobreaker-video-reason {
+        font-size: 10px !important;
+        color: #22c55e !important;
+        font-style: italic !important;
+        display: -webkit-box !important;
+        -webkit-line-clamp: 2 !important;
+        -webkit-box-orient: vertical !important;
+        overflow: hidden !important;
+      }
+      
+      .echobreaker-safe-badge {
+        display: inline-flex !important;
+        align-items: center !important;
+        gap: 4px !important;
+        font-size: 9px !important;
+        background: rgba(34, 197, 94, 0.2) !important;
+        color: #22c55e !important;
+        padding: 2px 6px !important;
+        border-radius: 4px !important;
+        margin-top: 4px !important;
+      }
+      
+      /* Dark mode adjustments */
+      html[dark] .echobreaker-rec-container,
+      [dark] .echobreaker-rec-container {
+        background: linear-gradient(135deg, rgba(34, 197, 94, 0.15), rgba(59, 130, 246, 0.15)) !important;
+      }
+    `;
+    document.head.appendChild(style);
+  }
+
+  // Cache for recommendations
+  let cachedRecommendations = null;
+  let lastRecFetch = 0;
+  const REC_CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
+
+  // Get AI diverse recommendations
+  async function getDiverseRecommendations() {
+    // Use cache if fresh
+    if (cachedRecommendations && (Date.now() - lastRecFetch < REC_CACHE_DURATION)) {
+      return cachedRecommendations;
+    }
+    
+    try {
+      const response = await chrome.runtime.sendMessage({
+        type: 'GET_DIVERSE_RECOMMENDATIONS'
+      });
+      
+      if (response && response.recommendations) {
+        cachedRecommendations = response;
+        lastRecFetch = Date.now();
+        return response;
+      }
+    } catch (error) {
+      console.log('[EchoBreaker] Failed to get recommendations:', error.message);
+    }
+    
+    return { recommendations: [] };
+  }
+
+  // Create recommendation card HTML
+  function createRecommendationCard(rec) {
+    const card = document.createElement('a');
+    card.className = 'echobreaker-video-card';
+    card.href = rec.noCookieUrl || rec.youtubeUrl;
+    card.target = '_blank';
+    card.rel = 'noopener noreferrer';
+    card.dataset.videoId = rec.videoId;
+    
+    card.innerHTML = `
+      <img class="echobreaker-video-thumbnail" 
+           src="${rec.thumbnailUrl}" 
+           alt="${rec.title}"
+           onerror="this.src='https://img.youtube.com/vi/${rec.videoId}/mqdefault.jpg'">
+      <div class="echobreaker-video-info">
+        <div class="echobreaker-video-title">${rec.title}</div>
+        <div class="echobreaker-video-channel">${rec.channelName}</div>
+        <div class="echobreaker-video-reason">${rec.reason}</div>
+        <div class="echobreaker-safe-badge">
+          <span>&#128274;</span> Algorithm-safe viewing
+        </div>
+      </div>
+    `;
+    
+    // Open in youtube-nocookie to not affect algorithm
+    card.addEventListener('click', (e) => {
+      e.preventDefault();
+      window.open(rec.noCookieUrl || `https://www.youtube-nocookie.com/embed/${rec.videoId}`, '_blank');
+    });
+    
+    return card;
+  }
+
+  // Create the full recommendation container
+  function createRecommendationContainer(recommendations, targetPerspective) {
+    const container = document.createElement('div');
+    container.className = 'echobreaker-rec-container';
+    container.id = 'echobreaker-diverse-recs';
+    
+    const header = document.createElement('div');
+    header.className = 'echobreaker-rec-header';
+    header.innerHTML = `
+      <div class="echobreaker-rec-logo">E</div>
+      <span class="echobreaker-rec-title">EchoBreaker: Diverse Perspectives</span>
+      <span class="echobreaker-rec-subtitle">AI-curated ${targetPerspective || 'balanced'} content</span>
+    `;
+    
+    container.appendChild(header);
+    
+    // Add video cards
+    recommendations.forEach(rec => {
+      container.appendChild(createRecommendationCard(rec));
+    });
+    
+    return container;
+  }
+
+  // Find best insertion point in YouTube DOM
+  function findInsertionPoint() {
+    // Try sidebar (watch page)
+    const sidebar = document.querySelector('#secondary-inner, #related');
+    if (sidebar) {
+      return { element: sidebar, position: 'prepend' };
+    }
+    
+    // Try home page content
+    const homeContent = document.querySelector('ytd-rich-grid-renderer #contents');
+    if (homeContent) {
+      return { element: homeContent, position: 'prepend' };
+    }
+    
+    // Try search results
+    const searchResults = document.querySelector('ytd-section-list-renderer #contents');
+    if (searchResults) {
+      return { element: searchResults, position: 'prepend' };
+    }
+    
+    return null;
+  }
+
+  // Inject recommendations into YouTube DOM
+  async function injectDiverseRecommendations() {
+    // Don't inject if already present
+    if (document.getElementById('echobreaker-diverse-recs')) {
+      return;
+    }
+    
+    injectRecommendationStyles();
+    
+    const { recommendations, targetPerspective } = await getDiverseRecommendations();
+    
+    if (!recommendations || recommendations.length === 0) {
+      console.log('[EchoBreaker] No diverse recommendations available');
+      return;
+    }
+    
+    const insertPoint = findInsertionPoint();
+    if (!insertPoint) {
+      console.log('[EchoBreaker] No suitable insertion point found');
+      return;
+    }
+    
+    const container = createRecommendationContainer(recommendations, targetPerspective);
+    
+    if (insertPoint.position === 'prepend') {
+      insertPoint.element.insertBefore(container, insertPoint.element.firstChild);
+    } else {
+      insertPoint.element.appendChild(container);
+    }
+    
+    console.log(`[EchoBreaker] Injected ${recommendations.length} diverse recommendations`);
+  }
+
+  // Watch for page navigation to inject recommendations
+  function observeForRecommendationInjection() {
+    // Initial injection after page loads
+    setTimeout(() => injectDiverseRecommendations(), 3000);
+    
+    // Watch for YouTube SPA navigation
+    let lastUrl = location.href;
+    const navObserver = new MutationObserver(() => {
+      if (location.href !== lastUrl) {
+        lastUrl = location.href;
+        // Remove existing container on navigation
+        const existing = document.getElementById('echobreaker-diverse-recs');
+        if (existing) existing.remove();
+        // Re-inject after navigation
+        setTimeout(() => injectDiverseRecommendations(), 2000);
+      }
+    });
+    
+    if (document.body) {
+      navObserver.observe(document.body, { childList: true, subtree: true });
+    }
+  }
+
+  // Initialize recommendation injection
+  function initRecommendations() {
+    console.log('[EchoBreaker] Initializing AI recommendation injection');
+    injectRecommendationStyles();
+    observeForRecommendationInjection();
+  }
+
   // Start
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', () => {
       init();
       setTimeout(initOverlays, 2000);
+      setTimeout(initRecommendations, 3000);
     });
   } else {
     init();
     setTimeout(initOverlays, 2000);
+    setTimeout(initRecommendations, 3000);
   }
 })();

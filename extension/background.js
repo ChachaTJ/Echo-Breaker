@@ -321,38 +321,29 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
     // Build clean watch URL
     const watchUrl = `https://www.youtube.com/watch?v=${videoId}`;
     
-    try {
-      // Try to open in incognito window
-      await chrome.windows.create({
-        url: watchUrl,
-        incognito: true,
-        focused: true
-      });
-      console.log('[EchoBreaker] Opened in incognito:', watchUrl);
-    } catch (error) {
-      // If incognito fails (extension not allowed in incognito)
-      console.log('[EchoBreaker] Incognito failed:', error.message);
-      
-      // Open YouTube embed version in a new window (logged out experience)
-      // Embed URL doesn't use login session
-      const embedUrl = `https://www.youtube.com/embed/${videoId}?autoplay=1`;
-      
-      await chrome.windows.create({
-        url: embedUrl,
-        focused: true,
-        width: 1280,
-        height: 720
-      });
-      
-      console.log('[EchoBreaker] Opened embed (no login):', embedUrl);
-    }
+    // Use youtube-nocookie.com - doesn't save to watch history or affect algorithm
+    const noCookieUrl = `https://www.youtube-nocookie.com/embed/${videoId}?autoplay=1&rel=0`;
+    
+    await chrome.windows.create({
+      url: noCookieUrl,
+      focused: true,
+      width: 1280,
+      height: 720,
+      type: 'popup'
+    });
+    
+    console.log('[EchoBreaker] Opened in algorithm-safe mode:', noCookieUrl);
   }
 });
 
-// Handle messages for getting video stance info
+// Handle messages for getting video stance info and diverse recommendations
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'GET_VIDEO_STANCES') {
     getVideoStances(message.videoIds).then(sendResponse);
+    return true;
+  }
+  if (message.type === 'GET_DIVERSE_RECOMMENDATIONS') {
+    getDiverseRecommendations().then(sendResponse);
     return true;
   }
 });
@@ -375,5 +366,26 @@ async function getVideoStances(videoIds) {
   } catch (error) {
     console.log('[EchoBreaker] Failed to get video stances:', error.message);
     return { stances: {} };
+  }
+}
+
+async function getDiverseRecommendations() {
+  try {
+    const stored = await chrome.storage.local.get(['apiUrl']);
+    const apiUrl = stored.apiUrl || DEFAULT_SETTINGS.apiUrl;
+    
+    const response = await fetch(`${apiUrl}/api/recommendations/diverse`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({})
+    });
+    
+    if (response.ok) {
+      return await response.json();
+    }
+    return { recommendations: [] };
+  } catch (error) {
+    console.log('[EchoBreaker] Failed to get diverse recommendations:', error.message);
+    return { recommendations: [] };
   }
 }

@@ -372,6 +372,156 @@ export async function registerRoutes(
     }
   });
 
+  // AI-powered diverse video recommendations for DOM injection
+  app.post("/api/recommendations/diverse", async (req, res) => {
+    try {
+      const client = getGeminiClient();
+      
+      // Get user's viewing data for context
+      const videos = await storage.getVideos();
+      const insights = await storage.getVideoInsights();
+      
+      // Calculate user's dominant stance
+      const stanceCounts: Record<string, number> = {
+        progressive: 0,
+        conservative: 0,
+        centrist: 0
+      };
+      
+      for (const insight of insights) {
+        if (insight.stance && insight.stance !== 'non-political' && stanceCounts.hasOwnProperty(insight.stance)) {
+          stanceCounts[insight.stance]++;
+        }
+      }
+      
+      const totalPolitical = Object.values(stanceCounts).reduce((a, b) => a + b, 0);
+      let dominantStance: string | null = null;
+      
+      if (totalPolitical >= 3) {
+        const sorted = Object.entries(stanceCounts).sort((a, b) => b[1] - a[1]);
+        if (sorted[0][1] > totalPolitical * 0.4) {
+          dominantStance = sorted[0][0];
+        }
+      }
+      
+      // Get recent video titles and channels for context
+      const recentVideos = videos.slice(0, 20).map(v => ({
+        title: v.title,
+        channel: v.channelName
+      }));
+      
+      // Determine what diverse content to recommend
+      let targetPerspective = 'centrist';
+      if (dominantStance === 'progressive') {
+        targetPerspective = 'conservative or centrist';
+      } else if (dominantStance === 'conservative') {
+        targetPerspective = 'progressive or centrist';
+      }
+      
+      if (!client) {
+        // Return hardcoded example if no AI available
+        return res.json({
+          recommendations: [
+            {
+              videoId: 'hHCGy3TFGCE',
+              title: 'Diverse Perspective Video',
+              channelName: 'EchoBreaker Recommendation',
+              reason: 'This video offers a different viewpoint from your usual content',
+              thumbnailUrl: 'https://img.youtube.com/vi/hHCGy3TFGCE/mqdefault.jpg',
+              noCookieUrl: 'https://www.youtube-nocookie.com/embed/hHCGy3TFGCE',
+              pipedUrl: 'https://piped.video/watch?v=hHCGy3TFGCE'
+            }
+          ],
+          dominantStance,
+          targetPerspective
+        });
+      }
+      
+      // Use Gemini to generate recommendations
+      const prompt = `You are helping a user break out of their YouTube echo chamber.
+
+Based on their viewing history, they appear to lean ${dominantStance || 'unknown'} politically.
+
+Their recent videos include:
+${recentVideos.slice(0, 10).map(v => `- "${v.title}" by ${v.channel}`).join('\n')}
+
+Please recommend 3-5 specific, REAL YouTube videos that would expose them to ${targetPerspective} perspectives while still being engaging and informative.
+
+For each recommendation, provide:
+1. The exact YouTube video ID (11 characters)
+2. The video title
+3. The channel name
+4. A brief reason why this would broaden their perspective
+
+IMPORTANT: Only recommend real, existing YouTube videos. Format as JSON array:
+[
+  {
+    "videoId": "xxxxxxxxxxx",
+    "title": "Video Title",
+    "channelName": "Channel Name",
+    "reason": "Why this video helps diversify their viewpoint"
+  }
+]
+
+Focus on high-quality, popular videos from reputable sources that offer balanced or alternative viewpoints.`;
+
+      try {
+        const response = await client.models.generateContent({
+          model: 'gemini-2.5-flash-preview-05-20',
+          contents: prompt
+        });
+        
+        const text = response.text || '';
+        
+        // Extract JSON from response
+        const jsonMatch = text.match(/\[[\s\S]*\]/);
+        if (jsonMatch) {
+          const recommendations = JSON.parse(jsonMatch[0]);
+          
+          // Enrich with URLs
+          const enrichedRecs = recommendations.map((rec: any) => ({
+            ...rec,
+            thumbnailUrl: `https://img.youtube.com/vi/${rec.videoId}/mqdefault.jpg`,
+            noCookieUrl: `https://www.youtube-nocookie.com/embed/${rec.videoId}`,
+            pipedUrl: `https://piped.video/watch?v=${rec.videoId}`,
+            youtubeUrl: `https://www.youtube.com/watch?v=${rec.videoId}`
+          }));
+          
+          return res.json({
+            recommendations: enrichedRecs,
+            dominantStance,
+            targetPerspective,
+            generatedAt: new Date().toISOString()
+          });
+        }
+      } catch (aiError) {
+        console.error('Gemini recommendation generation failed:', aiError);
+      }
+      
+      // Fallback: return example video
+      res.json({
+        recommendations: [
+          {
+            videoId: 'hHCGy3TFGCE',
+            title: 'Diverse Perspective Video',
+            channelName: 'EchoBreaker Recommendation',
+            reason: 'This video offers a different viewpoint from your usual content',
+            thumbnailUrl: 'https://img.youtube.com/vi/hHCGy3TFGCE/mqdefault.jpg',
+            noCookieUrl: 'https://www.youtube-nocookie.com/embed/hHCGy3TFGCE',
+            pipedUrl: 'https://piped.video/watch?v=hHCGy3TFGCE',
+            youtubeUrl: 'https://www.youtube.com/watch?v=hHCGy3TFGCE'
+          }
+        ],
+        dominantStance,
+        targetPerspective,
+        fallback: true
+      });
+    } catch (error) {
+      console.error('Failed to generate diverse recommendations:', error);
+      res.status(500).json({ error: "Failed to generate recommendations" });
+    }
+  });
+
   // Extension status and version endpoint
   app.get("/api/extension/status", (req, res) => {
     const isConnected = extensionConnection && 
