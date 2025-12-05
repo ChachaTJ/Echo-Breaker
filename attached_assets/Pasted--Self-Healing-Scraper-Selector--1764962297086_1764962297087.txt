@@ -1,0 +1,175 @@
+네, 가능합니다. 이를 **"Self-Healing Scraper(자가 치유 스크래퍼)"**라고 부르기도 합니다.
+
+기존 방식이 **'개발자가 미리 정한 규칙(Selector)을 코드에 박아넣는 것'**이라면, 제안하신 방식은 **'현재 페이지의 HTML 조각을 AI에게 던져주고, "여기서 제목이랑 조회수 태그가 뭐야?"라고 물어본 뒤 그 답을 이용해 크롤링하는 것'**입니다.
+
+이미 Gemini API를 사용 중이시니, 크롬 확장프로그램에 바로 연동하여 구현하는 구조를 알려드리겠습니다.
+
+핵심 로직 구조
+HTML 샘플링: content.js가 페이지에서 반복되는 요소(예: 첫 번째 영상 카드) 하나만 떼어내어 HTML 텍스트로 만듭니다.
+
+AI 분석 요청: 이 HTML 텍스트를 Gemini API에 전송하며 "영상 제목, 조회수, 채널명의 CSS Selector를 JSON으로 줘"라고 프롬프팅합니다.
+
+동적 크롤링: Gemini가 알려준 Selector를 이용해 나머지 모든 영상을 크롤링합니다.
+
+구현 코드 가이드
+기존 코드에서 background.js를 추가하고 로직을 변경해야 합니다.
+
+1. manifest.json 업데이트
+Gemini API 서버와 통신하기 위해 권한을 추가합니다.
+
+JSON
+
+{
+  "manifest_version": 3,
+  "name": "AI YouTube Crawler",
+  "version": "2.0",
+  "permissions": ["activeTab", "scripting"],
+  "host_permissions": ["https://generativelanguage.googleapis.com/*"], 
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": { "default_popup": "popup.html" },
+  "content_scripts": [
+    {
+      "matches": ["https://www.youtube.com/*"],
+      "js": ["content.js"]
+    }
+  ]
+}
+2. background.js (Gemini API 통신 담당)
+API 키를 노출하는 것은 보안상 좋지 않지만, 개인 사용 목적이므로 여기에 작성합니다. (실제 배포 시에는 백엔드 서버를 거쳐야 안전합니다.)
+
+JavaScript
+
+const API_KEY = "YOUR_GEMINI_API_KEY"; // 여기에 API 키 입력
+
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  if (request.action === "ANALYZE_HTML") {
+    analyzeWithGemini(request.htmlSnippet).then(sendResponse);
+    return true; // 비동기 응답을 위해 필수
+  }
+});
+
+async function analyzeWithGemini(htmlSnippet) {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${API_KEY}`;
+  
+  // 프롬프트 엔지니어링: 정확한 JSON 포맷을 요구합니다.
+  const prompt = `
+    Analyze the following HTML snippet of a YouTube video card.
+    Identify the CSS Selectors for:
+    1. Video Title (text)
+    2. Channel Name (text)
+    3. Metadata Line (contains views and date)
+    
+    Return ONLY a raw JSON object (no markdown, no explanations) with keys: "titleSelector", "channelSelector", "metaSelector".
+    
+    HTML Snippet:
+    ${htmlSnippet}
+  `;
+
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }]
+      })
+    });
+    
+    const data = await response.json();
+    const aiText = data.candidates[0].content.parts[0].text;
+    
+    // 마크다운 코드블럭 제거 및 파싱
+    const jsonStr = aiText.replace(/```json|```/g, "").trim();
+    return { selectors: JSON.parse(jsonStr) };
+    
+  } catch (error) {
+    console.error("Gemini API Error:", error);
+    return { error: error.message };
+  }
+}
+3. content.js (AI에게 물어보고 크롤링 실행)
+하드코딩된 선택자 대신, 가장 먼저 보이는 비디오 카드를 샘플로 떠서 AI에게 분석을 맡깁니다.
+
+JavaScript
+
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  if (request.action === "CRAWL_DATA") {
+    performSmartCrawl().then(data => sendResponse({ result: data }));
+    return true;
+  }
+});
+
+async function performSmartCrawl() {
+  // 1. 샘플 HTML 추출 (가장 상위의 미디어 요소 하나만 잡음)
+  // ytd-rich-grid-media는 비교적 큰 구조라 잘 안 변하지만, 이것조차 변하면 더 상위 태그를 잡아야 합니다.
+  const sampleCard = document.querySelector('ytd-rich-grid-media');
+  
+  if (!sampleCard) {
+    console.error("비디오 카드를 찾을 수 없습니다.");
+    return [];
+  }
+
+  // HTML 내용을 줄여서 토큰 비용 절약 (SVG, 긴 스타일 제거 등 전처리 추천)
+  // 여기서는 단순히 outerHTML 사용
+  const htmlSnippet = sampleCard.outerHTML.slice(0, 5000); // 너무 길면 잘림 방지
+
+  // 2. Background Script로 보내서 Gemini에게 선택자 물어보기
+  const response = await chrome.runtime.sendMessage({
+    action: "ANALYZE_HTML",
+    htmlSnippet: htmlSnippet
+  });
+
+  if (!response.selectors) {
+    console.error("AI가 선택자를 찾지 못했습니다.");
+    return [];
+  }
+
+  const { titleSelector, channelSelector, metaSelector } = response.selectors;
+  console.log("AI가 발견한 선택자:", response.selectors);
+
+  // 3. AI가 찾아준 선택자로 전체 크롤링 시작
+  const data = [];
+  const videoItems = document.querySelectorAll('ytd-rich-grid-media');
+
+  videoItems.forEach((item) => {
+    try {
+      const titleEl = item.querySelector(titleSelector);
+      const channelEl = item.querySelector(channelSelector);
+      const metaEls = item.querySelectorAll(metaSelector + ' span'); // 보통 메타데이터는 span 안에 있음
+
+      const title = titleEl ? titleEl.innerText.trim() : "";
+      const channel = channelEl ? channelEl.innerText.trim() : "";
+      
+      // 조회수/날짜 처리 (구조에 따라 유연하게 대처 필요)
+      let views = "";
+      if (metaEls.length > 0) views = metaEls[0].innerText;
+
+      if (title) {
+        data.push({ title, channel, views });
+      }
+    } catch (e) {
+      // 에러 무시
+    }
+  });
+
+  return data;
+}
+이 방식의 장단점 및 팁
+토큰 최적화 (필수):
+
+outerHTML을 그대로 보내면 불필요한 SVG 경로, 긴 class 이름들 때문에 토큰이 낭비됩니다.
+
+JS에서 HTML을 보낼 때 element.innerText가 아니라 태그 구조는 유지하되 내용이 긴 속성(attribute)은 정규식으로 지워서 보내는 것이 좋습니다.
+
+비용과 속도:
+
+매번 크롤링할 때마다 AI를 호출하면 속도가 느립니다 (약 1~2초 지연).
+
+전략: 처음에 한 번만 AI를 호출하고, 그 결과(Selector)를 chrome.storage에 저장해 둡니다. 만약 크롤링 결과가 0개라면 "구조가 바뀌었다"고 판단하고 그때 다시 AI를 호출하는 로직을 짜면 효율적입니다.
+
+JSON 파싱:
+
+LLM은 가끔 JSON 앞뒤에 설명을 붙입니다 (Here is the JSON...). 코드 내의 정규식(replace) 처리가 중요합니다.
+
+추가 제안: 혹시 Pobble 프로젝트(필터버블 관련)에서도 이런 방식을 활용하실 계획이신가요? 추천 알고리즘의 편향성을 분석하려면 영상 데이터뿐만 아니라 UI 레이아웃의 변화도 감지해야 할 텐데, 이 'AI 기반 DOM 분석' 방식이 꽤 유용할 수 있습니다.
