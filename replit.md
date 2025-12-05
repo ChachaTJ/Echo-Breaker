@@ -165,13 +165,19 @@ EchoBreaker is a web application + Chrome extension system designed to help user
   - 2D view: channels plotted on left-right spectrum with size by video count
   - 3D view: adds depth with rotation/zoom controls for exploring the bias landscape
   - Color coding: blue (left), green (center), red (right)
-- **NEW: AI-Adaptive DOM Selector Discovery**
-  - Automatically detects when YouTube changes its DOM structure
-  - Uses GPT-4o-mini to analyze HTML and generate new CSS selectors
-  - Three-tier fallback: cached selectors → default selectors → AI-generated
-  - Server-side selector caching with 24-hour TTL to reduce API costs
-  - Client-side caching in chrome.storage.local for instant retrieval
-  - API endpoint: `POST /api/analyze-dom` and `GET /api/selectors`
+- **NEW: Self-Healing Scraper with AI Selector Discovery**
+  - Automatically adapts to YouTube's DOM structure changes (December 2024 update)
+  - Uses Gemini 2.5 Flash to analyze HTML snippets and discover optimal CSS selectors
+  - Four-tier fallback chain for maximum reliability:
+    1. Cached selectors (24h TTL, stored in chrome.storage.local)
+    2. Default selectors (from DEFAULT_SELECTORS constant)
+    3. AI-generated selectors (via Gemini API)
+    4. Hardcoded heuristics (YouTube Dec 2024 DOM patterns)
+  - HTML "diet" function reduces token usage by 80% (removes SVG, scripts, styles)
+  - Supports data attributes (`data-id`, `data-video-id`) and content-id classes
+  - Metadata extraction (view count, upload date) via metaSelector
+  - Successful selectors are cached for faster future extraction
+  - API endpoint: `POST /api/analyze-selectors`
 - **NEW: 3D Filter Bubble Visualization**
   - Three.js WebGL rendering with soap bubble effect nodes
   - Thumbnails distorted inside transparent bubbles using fisheye shader
@@ -199,13 +205,11 @@ EchoBreaker is a web application + Chrome extension system designed to help user
   - Retry mechanism for robust insertion on dynamic pages
   - Automatic cleanup and re-injection on SPA navigation
   - API endpoint: `POST /api/recommendations/diverse`
-- **NEW: Algorithm-Safe Viewing via youtube-nocookie.com**
-  - Context menu "Watch without affecting algorithm" uses youtube-nocookie.com
-  - Recommended videos link to youtube-nocookie.com embed URLs
-  - Piped.video as alternative privacy-preserving viewing option
-  - Opens in popup window for clean viewing experience
-  - Viewing doesn't save to watch history or affect recommendations
-  - Badge indicator shows "Algorithm-safe viewing" on injected cards
+- **YouTube December 2024 DOM Structure Support**
+  - `yt-lockup-view-model` structure with `content-id-{videoId}` classes
+  - `yt-core-attributed-string` for video titles
+  - `.yt-lockup-metadata-view-model__subtitle` for channel names
+  - Shorts detection via `yt-lockup-view-model--shorts` class
 
 ## Known Limitations
 - Chrome extension needs icon files (16x16, 48x48, 128x128 PNG) - removed from manifest to allow loading
