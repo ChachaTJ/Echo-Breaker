@@ -58,6 +58,38 @@
   let selectorFailures = {};
   
   // =============================================
+  // Debug Logging Helper (sends to background)
+  // =============================================
+  
+  async function log(level, message, details = null) {
+    // Console log for DevTools debugging
+    const prefix = `[EchoBreaker]`;
+    if (level === 'error') {
+      console.error(prefix, message, details || '');
+    } else if (level === 'warning') {
+      console.warn(prefix, message, details || '');
+    } else {
+      console.log(prefix, message, details || '');
+    }
+    
+    // Send to background for popup display
+    try {
+      await chrome.runtime.sendMessage({
+        type: 'LOG_EVENT',
+        entry: {
+          level,
+          message,
+          details: details || {},
+          source: 'content',
+          url: window.location.href
+        }
+      });
+    } catch (e) {
+      // Background might not be ready
+    }
+  }
+  
+  // =============================================
   // Visual Feedback System
   // =============================================
   
@@ -515,16 +547,16 @@
 
   async function collectData() {
     if (isCollecting) {
-      console.log('[EchoBreaker] Already collecting, skipping...');
+      await log('warning', '수집 중 - 건너뜀');
       return;
     }
     isCollecting = true;
 
     const pageType = detectPageType();
-    console.log('[EchoBreaker] ========== DATA COLLECTION START ==========');
-    console.log('[EchoBreaker] Page type:', pageType);
-    console.log('[EchoBreaker] URL:', window.location.href);
-    console.log('[EchoBreaker] Document state:', document.readyState);
+    await log('info', `데이터 수집 시작`, { 
+      pageType, 
+      url: window.location.href.substring(0, 50) 
+    });
     
     // Reset debug counter
     window._ebDebugCount = 0;
@@ -569,11 +601,13 @@
       data.subscriptions = await collectSubscriptionChannels();
 
       const totalItems = data.videos.length + data.shorts.length + data.recommendedVideos.length + data.subscriptions.length;
-      console.log('[EchoBreaker] Collected:', {
+      
+      await log('info', `DOM 수집 완료`, {
         videos: data.videos.length,
         shorts: data.shorts.length,
         recommended: data.recommendedVideos.length,
-        subscriptions: data.subscriptions.length
+        subscriptions: data.subscriptions.length,
+        total: totalItems
       });
       
       if (totalItems > 0) {
@@ -586,6 +620,13 @@
             shorts: data.shorts.length,
             recommended: data.recommendedVideos.length
           });
+          
+          await log('success', `서버 전송 성공`, {
+            videos: data.videos.length,
+            shorts: data.shorts.length,
+            recommended: data.recommendedVideos.length
+          });
+          
           chrome.runtime.sendMessage({ 
             type: 'SYNC_COMPLETE', 
             data: {
@@ -599,11 +640,12 @@
           updateCrawlIndicator('error', { message: '서버 전송 실패' });
         }
       } else {
+        await log('warning', '수집할 데이터 없음', { pageType });
         updateCrawlIndicator('nodata');
       }
 
     } catch (error) {
-      console.error('[EchoBreaker] Collection error:', error);
+      await log('error', `수집 오류: ${error.message}`);
       updateCrawlIndicator('error', { message: error.message });
     } finally {
       isCollecting = false;
@@ -690,16 +732,16 @@
     // Get all content items from home page - Try multiple selectors
     let allEls = Array.from(document.querySelectorAll('ytd-rich-item-renderer, ytd-video-renderer, ytd-reel-item-renderer'));
     
-    // Debug: Log DOM structure to understand what's available
-    console.log('[EchoBreaker] === HOME PAGE DEBUG ===');
-    console.log('[EchoBreaker] URL:', window.location.href);
-    console.log('[EchoBreaker] Found ytd-rich-item-renderer:', document.querySelectorAll('ytd-rich-item-renderer').length);
-    console.log('[EchoBreaker] Found ytd-video-renderer:', document.querySelectorAll('ytd-video-renderer').length);
-    console.log('[EchoBreaker] Found ytd-rich-grid-media:', document.querySelectorAll('ytd-rich-grid-media').length);
-    console.log('[EchoBreaker] Found #video-title elements:', document.querySelectorAll('#video-title').length);
-    console.log('[EchoBreaker] Found a#thumbnail:', document.querySelectorAll('a#thumbnail').length);
-    console.log('[EchoBreaker] Document ready state:', document.readyState);
-    console.log('[EchoBreaker] Found home page content elements:', allEls.length);
+    // Log DOM element counts for debugging
+    const domStats = {
+      richItemRenderer: document.querySelectorAll('ytd-rich-item-renderer').length,
+      videoRenderer: document.querySelectorAll('ytd-video-renderer').length,
+      videoTitle: document.querySelectorAll('#video-title').length,
+      thumbnail: document.querySelectorAll('a#thumbnail').length,
+      totalElements: allEls.length
+    };
+    
+    await log('info', `홈 페이지 DOM 분석`, domStats);
 
     for (let i = 0; i < Math.min(allEls.length, CONFIG.MAX_VIDEOS * 2); i++) {
       const el = allEls[i];
@@ -1017,7 +1059,7 @@
   }
 
   async function sendToServer(data) {
-    console.log('[EchoBreaker] Sending data to server:', CONFIG.API_BASE_URL);
+    await log('info', `서버 전송 중...`, { url: CONFIG.API_BASE_URL });
     
     // Get extension version
     const manifest = chrome.runtime.getManifest();
@@ -1040,7 +1082,9 @@
       
       return true;
     } catch (error) {
-      console.error('[EchoBreaker] Failed to send data:', error);
+      await log('error', `서버 전송 실패: ${error.message}`, {
+        serverUrl: CONFIG.API_BASE_URL
+      });
       
       const stored = await chrome.storage.local.get(['pendingData']);
       const pending = stored.pendingData || [];

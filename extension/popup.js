@@ -353,4 +353,105 @@ document.addEventListener('DOMContentLoaded', async () => {
     
     return date.toLocaleDateString();
   }
+  
+  // =========================
+  // Debug Tab Functionality
+  // =========================
+  
+  const refreshLogsBtn = document.getElementById('refresh-logs-btn');
+  const clearLogsBtn = document.getElementById('clear-logs-btn');
+  const debugLogsContainer = document.getElementById('debug-logs');
+  const debugEmpty = document.getElementById('debug-empty');
+  
+  // Load logs when Debug tab is opened
+  tabs.forEach(tab => {
+    tab.addEventListener('click', async () => {
+      if (tab.dataset.tab === 'debug') {
+        await loadDebugLogs();
+      }
+    });
+  });
+  
+  // Refresh logs button
+  refreshLogsBtn.addEventListener('click', async () => {
+    refreshLogsBtn.style.transform = 'rotate(360deg)';
+    await loadDebugLogs();
+    setTimeout(() => {
+      refreshLogsBtn.style.transform = '';
+    }, 300);
+  });
+  
+  // Clear logs button
+  clearLogsBtn.addEventListener('click', async () => {
+    try {
+      await chrome.runtime.sendMessage({ type: 'CLEAR_DEBUG_LOGS' });
+      await loadDebugLogs();
+    } catch (error) {
+      console.error('Failed to clear logs:', error);
+    }
+  });
+  
+  async function loadDebugLogs() {
+    try {
+      const logs = await chrome.runtime.sendMessage({ type: 'GET_DEBUG_LOGS' });
+      
+      if (!logs || logs.length === 0) {
+        debugEmpty.style.display = 'flex';
+        debugLogsContainer.innerHTML = '';
+        return;
+      }
+      
+      debugEmpty.style.display = 'none';
+      debugLogsContainer.innerHTML = logs.map(log => renderLogEntry(log)).join('');
+      
+    } catch (error) {
+      console.error('Failed to load debug logs:', error);
+      debugEmpty.style.display = 'flex';
+      debugLogsContainer.innerHTML = '';
+    }
+  }
+  
+  function renderLogEntry(log) {
+    const time = new Date(log.timestamp);
+    const timeStr = time.toLocaleTimeString('ko-KR', { 
+      hour: '2-digit', 
+      minute: '2-digit', 
+      second: '2-digit' 
+    });
+    
+    const level = log.level || 'info';
+    const hasDetails = log.details && Object.keys(log.details).length > 0;
+    
+    let detailsHtml = '';
+    if (hasDetails) {
+      detailsHtml = `<div class="debug-log-details">${JSON.stringify(log.details, null, 2)}</div>`;
+    }
+    
+    return `
+      <div class="debug-log-entry ${level}">
+        <div class="debug-log-header">
+          <span class="debug-log-time">${timeStr}</span>
+          <span class="debug-log-level ${level}">${translateLevel(level)}</span>
+        </div>
+        <div class="debug-log-message">${escapeHtml(log.message)}</div>
+        ${detailsHtml}
+      </div>
+    `;
+  }
+  
+  function translateLevel(level) {
+    const translations = {
+      'info': '정보',
+      'success': '성공',
+      'warning': '경고',
+      'error': '오류'
+    };
+    return translations[level] || level;
+  }
+  
+  function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+  }
 });

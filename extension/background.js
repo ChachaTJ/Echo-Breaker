@@ -17,6 +17,61 @@ const DEFAULT_SETTINGS = {
   collectShorts: true
 };
 
+// Debug logging system
+const MAX_DEBUG_LOGS = 50;
+const DEBUG_LOGS_KEY = 'echobreaker_debug_logs';
+
+async function addDebugLog(entry) {
+  try {
+    const stored = await chrome.storage.local.get([DEBUG_LOGS_KEY]);
+    let logs = stored[DEBUG_LOGS_KEY] || [];
+    
+    // Add timestamp if not present
+    const logEntry = {
+      ...entry,
+      timestamp: entry.timestamp || Date.now(),
+      id: Date.now() + Math.random().toString(36).substr(2, 9)
+    };
+    
+    // Add to beginning (newest first)
+    logs.unshift(logEntry);
+    
+    // Trim to max size
+    if (logs.length > MAX_DEBUG_LOGS) {
+      logs = logs.slice(0, MAX_DEBUG_LOGS);
+    }
+    
+    await chrome.storage.local.set({ [DEBUG_LOGS_KEY]: logs });
+    console.log('[EchoBreaker] Log added:', logEntry.message);
+    
+    return logEntry;
+  } catch (error) {
+    console.error('[EchoBreaker] Failed to add debug log:', error);
+    return null;
+  }
+}
+
+async function getDebugLogs() {
+  try {
+    const stored = await chrome.storage.local.get([DEBUG_LOGS_KEY]);
+    return stored[DEBUG_LOGS_KEY] || [];
+  } catch (error) {
+    console.error('[EchoBreaker] Failed to get debug logs:', error);
+    return [];
+  }
+}
+
+async function clearDebugLogs() {
+  try {
+    await chrome.storage.local.set({ [DEBUG_LOGS_KEY]: [] });
+    console.log('[EchoBreaker] Debug logs cleared');
+    return true;
+  } catch (error) {
+    console.error('[EchoBreaker] Failed to clear debug logs:', error);
+    return false;
+  }
+}
+
 // Initialize on install
 chrome.runtime.onInstalled.addListener(async () => {
   console.log('[EchoBreaker] Extension installed, version:', EXTENSION_VERSION);
@@ -111,6 +166,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     case 'OPEN_DASHBOARD':
       openDashboard();
       break;
+    
+    // Debug logging handlers
+    case 'LOG_EVENT':
+      addDebugLog(message.entry).then(sendResponse);
+      return true;
+    
+    case 'GET_DEBUG_LOGS':
+      getDebugLogs().then(sendResponse);
+      return true;
+    
+    case 'CLEAR_DEBUG_LOGS':
+      clearDebugLogs().then(sendResponse);
+      return true;
   }
 });
 

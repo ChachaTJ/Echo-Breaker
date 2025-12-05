@@ -517,6 +517,149 @@
     .dom-status.success .dom-refresh-btn {
       display: none;
     }
+
+    /* Debug Tab Styles */
+    .debug-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+
+    .debug-title {
+      font-weight: 600;
+      font-size: 14px;
+    }
+
+    .debug-actions {
+      display: flex;
+      gap: 8px;
+    }
+
+    .debug-btn {
+      width: 32px;
+      height: 32px;
+      border: none;
+      background: #262626;
+      border-radius: 8px;
+      color: #e5e5e5;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s;
+    }
+
+    .debug-btn:hover {
+      background: #333;
+    }
+
+    .debug-btn svg {
+      width: 16px;
+      height: 16px;
+    }
+
+    .debug-log-container {
+      background: #171717;
+      border: 1px solid #262626;
+      border-radius: 12px;
+      height: 320px;
+      overflow-y: auto;
+    }
+
+    .debug-empty {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+      color: #737373;
+      gap: 8px;
+      padding: 20px;
+      text-align: center;
+    }
+
+    .debug-empty svg {
+      width: 40px;
+      height: 40px;
+      opacity: 0.5;
+    }
+
+    .debug-empty-sub {
+      font-size: 11px;
+      opacity: 0.7;
+    }
+
+    .debug-logs {
+      padding: 8px;
+    }
+
+    .debug-log-entry {
+      padding: 10px 12px;
+      border-radius: 8px;
+      margin-bottom: 6px;
+      font-size: 12px;
+      border-left: 3px solid #262626;
+      background: #1a1a1a;
+    }
+
+    .debug-log-entry.info {
+      border-left-color: #3b82f6;
+    }
+
+    .debug-log-entry.success {
+      border-left-color: #22c55e;
+    }
+
+    .debug-log-entry.warning {
+      border-left-color: #f59e0b;
+    }
+
+    .debug-log-entry.error {
+      border-left-color: #ef4444;
+    }
+
+    .debug-log-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 4px;
+    }
+
+    .debug-log-time {
+      color: #737373;
+      font-size: 10px;
+    }
+
+    .debug-log-level {
+      font-size: 10px;
+      padding: 2px 6px;
+      border-radius: 4px;
+      text-transform: uppercase;
+      font-weight: 600;
+    }
+
+    .debug-log-level.info { background: #3b82f620; color: #3b82f6; }
+    .debug-log-level.success { background: #22c55e20; color: #22c55e; }
+    .debug-log-level.warning { background: #f59e0b20; color: #f59e0b; }
+    .debug-log-level.error { background: #ef444420; color: #ef4444; }
+
+    .debug-log-message {
+      color: #e5e5e5;
+      word-break: break-word;
+    }
+
+    .debug-log-details {
+      margin-top: 6px;
+      padding: 8px;
+      background: #0f0f0f;
+      border-radius: 6px;
+      font-family: monospace;
+      font-size: 11px;
+      color: #a3a3a3;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
   </style>
 </head>
 <body>
@@ -540,6 +683,7 @@
 
   <div class="tabs">
     <div class="tab active" data-tab="home">Home</div>
+    <div class="tab" data-tab="debug">Debug</div>
     <div class="tab" data-tab="settings">Settings</div>
   </div>
 
@@ -622,6 +766,40 @@
           </svg>
           Open Dashboard
         </button>
+      </div>
+    </div>
+
+    <div class="tab-content" id="tab-debug">
+      <div class="debug-header">
+        <span class="debug-title">Crawl Logs</span>
+        <div class="debug-actions">
+          <button class="debug-btn" id="refresh-logs-btn" title="Refresh logs">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path>
+              <path d="M3 3v5h5"></path>
+            </svg>
+          </button>
+          <button class="debug-btn" id="clear-logs-btn" title="Clear logs">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="3 6 5 6 21 6"></polyline>
+              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+            </svg>
+          </button>
+        </div>
+      </div>
+      
+      <div class="debug-log-container" id="debug-log-container">
+        <div class="debug-empty" id="debug-empty">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+            <polyline points="14 2 14 8 20 8"></polyline>
+            <line x1="16" y1="13" x2="8" y2="13"></line>
+            <line x1="16" y1="17" x2="8" y2="17"></line>
+          </svg>
+          <span>로그가 없습니다</span>
+          <span class="debug-empty-sub">YouTube에서 데이터 수집 시 로그가 표시됩니다</span>
+        </div>
+        <div class="debug-logs" id="debug-logs"></div>
       </div>
     </div>
 
