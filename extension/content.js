@@ -428,6 +428,15 @@
         const titleEl = findElement('#video-title, a#video-title-link', el);
         const channelEl = findElement('#channel-name a, ytd-channel-name a, #text-container a', el);
         const linkEl = findElement('a#thumbnail, a.ytd-thumbnail', el);
+        
+        // Extract additional metadata
+        const metadataEl = findElement('#metadata-line, ytd-video-meta-block', el);
+        const viewCountEl = findElement('#metadata-line span:first-child, .inline-metadata-item:first-child', el);
+        const uploadTimeEl = findElement('#metadata-line span:last-child, .inline-metadata-item:last-child', el);
+        const durationEl = findElement('ytd-thumbnail-overlay-time-status-renderer span, #overlays span.ytd-thumbnail-overlay-time-status-renderer', el);
+        
+        // Get channel avatar
+        const avatarEl = findElement('#avatar-link img, yt-img-shadow img', el);
 
         if (!titleEl) continue;
 
@@ -435,22 +444,82 @@
         const videoId = extractVideoId(href);
         if (!videoId) continue;
 
+        // Parse view count (e.g., "조회수 123만회" or "1.2M views")
+        const viewCountText = viewCountEl?.textContent?.trim() || '';
+        const viewCount = parseViewCount(viewCountText);
+
         videos.push({
           videoId,
           title: titleEl.textContent?.trim() || '',
           channelName: channelEl?.textContent?.trim() || 'Unknown',
-          channelId: channelEl?.href?.split('/').pop() || null,
+          channelId: extractChannelId(channelEl?.href),
+          channelAvatar: avatarEl?.src || null,
           thumbnailUrl: `https://img.youtube.com/vi/${videoId}/mqdefault.jpg`,
-          viewCount: null,
-          category: null,
-          tags: null
+          viewCount: viewCount,
+          viewCountText: viewCountText,
+          uploadTime: uploadTimeEl?.textContent?.trim() || null,
+          duration: durationEl?.textContent?.trim() || null,
+          source: 'home_feed',
+          collectedAt: new Date().toISOString()
         });
       } catch (e) {
         // Skip this video
       }
     }
 
+    console.log('[EchoBreaker] Collected home page videos:', videos.length);
     return videos;
+  }
+  
+  // Helper to extract channel ID from URL
+  function extractChannelId(href) {
+    if (!href) return null;
+    // Handle /@username format
+    const atMatch = href.match(/@([^\/\?]+)/);
+    if (atMatch) return '@' + atMatch[1];
+    // Handle /channel/ID format  
+    const channelMatch = href.match(/channel\/([^\/\?]+)/);
+    if (channelMatch) return channelMatch[1];
+    return href.split('/').pop() || null;
+  }
+  
+  // Parse view count from text like "조회수 123만회" or "1.2M views"
+  function parseViewCount(text) {
+    if (!text) return null;
+    // Remove non-numeric characters except for multiplier suffixes
+    const cleanText = text.replace(/[조회수views\s]/gi, '').trim();
+    
+    // Korean format: 123만, 45억
+    if (cleanText.includes('만')) {
+      const num = parseFloat(cleanText.replace('만', '').replace('회', ''));
+      return Math.round(num * 10000);
+    }
+    if (cleanText.includes('억')) {
+      const num = parseFloat(cleanText.replace('억', '').replace('회', ''));
+      return Math.round(num * 100000000);
+    }
+    if (cleanText.includes('천')) {
+      const num = parseFloat(cleanText.replace('천', '').replace('회', ''));
+      return Math.round(num * 1000);
+    }
+    
+    // English format: 1.2M, 500K
+    if (cleanText.includes('M')) {
+      const num = parseFloat(cleanText.replace('M', ''));
+      return Math.round(num * 1000000);
+    }
+    if (cleanText.includes('K')) {
+      const num = parseFloat(cleanText.replace('K', ''));
+      return Math.round(num * 1000);
+    }
+    if (cleanText.includes('B')) {
+      const num = parseFloat(cleanText.replace('B', ''));
+      return Math.round(num * 1000000000);
+    }
+    
+    // Plain number
+    const num = parseInt(cleanText.replace(/[^0-9]/g, ''), 10);
+    return isNaN(num) ? null : num;
   }
 
   async function collectSidebarRecommendations() {
@@ -467,6 +536,8 @@
         const titleEl = findElement('#video-title, span#video-title', el);
         const channelEl = findElement('#channel-name, ytd-channel-name', el);
         const linkEl = findElement('a', el);
+        const viewCountEl = findElement('.inline-metadata-item, #metadata-line span', el);
+        const durationEl = findElement('ytd-thumbnail-overlay-time-status-renderer span', el);
 
         if (!titleEl || !linkEl) continue;
 
@@ -474,21 +545,26 @@
         const videoId = extractVideoId(href);
         if (!videoId) continue;
 
+        const viewCountText = viewCountEl?.textContent?.trim() || '';
+
         videos.push({
           videoId,
           title: titleEl.textContent?.trim() || '',
           channelName: channelEl?.textContent?.trim() || 'Unknown',
-          channelId: null,
+          channelId: extractChannelId(channelEl?.querySelector('a')?.href),
           thumbnailUrl: `https://img.youtube.com/vi/${videoId}/mqdefault.jpg`,
-          viewCount: null,
-          category: null,
-          tags: null
+          viewCount: parseViewCount(viewCountText),
+          viewCountText: viewCountText,
+          duration: durationEl?.textContent?.trim() || null,
+          source: 'sidebar_recommendation',
+          collectedAt: new Date().toISOString()
         });
       } catch (e) {
         // Skip
       }
     }
 
+    console.log('[EchoBreaker] Collected sidebar recommendations:', videos.length);
     return videos;
   }
 
