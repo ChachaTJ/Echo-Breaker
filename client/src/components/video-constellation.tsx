@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { RotateCcw, ZoomIn, ZoomOut, Play, Pause, Maximize2, X, Sparkles } from 'lucide-react';
+import { RotateCcw, ZoomIn, ZoomOut, Play, Pause, X, Sparkles } from 'lucide-react';
 
 interface VideoNode {
   id: string;
@@ -23,17 +23,90 @@ interface VideoConstellationProps {
 }
 
 const CLUSTER_COLORS = [
-  '#FF6B6B', // Red - Politics Left
-  '#4ECDC4', // Teal - Tech
-  '#45B7D1', // Blue - Education
-  '#96CEB4', // Green - Nature
-  '#FFEAA7', // Yellow - Entertainment
-  '#DDA0DD', // Plum - Music
-  '#98D8C8', // Mint - Lifestyle
-  '#F7DC6F', // Gold - Business
-  '#BB8FCE', // Purple - Gaming
-  '#85C1E9', // Sky - Science
+  '#FF6B6B', // Red
+  '#4ECDC4', // Teal
+  '#45B7D1', // Blue
+  '#96CEB4', // Green
+  '#FFEAA7', // Yellow
+  '#DDA0DD', // Plum
+  '#98D8C8', // Mint
+  '#F7DC6F', // Gold
+  '#BB8FCE', // Purple
+  '#85C1E9', // Sky
 ];
+
+// Bubble shader with fisheye distortion for thumbnail
+const bubbleVertexShader = `
+  varying vec2 vUv;
+  varying vec3 vNormal;
+  varying vec3 vViewPosition;
+  
+  void main() {
+    vUv = uv;
+    vNormal = normalize(normalMatrix * normal);
+    vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+    vViewPosition = -mvPosition.xyz;
+    gl_Position = projectionMatrix * mvPosition;
+  }
+`;
+
+const bubbleFragmentShader = `
+  uniform sampler2D thumbnailTexture;
+  uniform vec3 outlineColor;
+  uniform float time;
+  
+  varying vec2 vUv;
+  varying vec3 vNormal;
+  varying vec3 vViewPosition;
+  
+  void main() {
+    // Calculate view direction for fresnel
+    vec3 viewDir = normalize(vViewPosition);
+    float fresnel = pow(1.0 - abs(dot(vNormal, viewDir)), 2.5);
+    
+    // Fisheye distortion for thumbnail - map sphere UV to circular distortion
+    vec2 centeredUv = vUv * 2.0 - 1.0;
+    float dist = length(centeredUv);
+    
+    // Only show thumbnail in the center area with fisheye effect
+    vec4 thumbnailColor = vec4(0.0);
+    if (dist < 0.85) {
+      // Fisheye distortion
+      float distortion = 1.0 - pow(dist, 1.5) * 0.3;
+      vec2 distortedUv = centeredUv * distortion;
+      vec2 finalUv = (distortedUv + 1.0) * 0.5;
+      
+      // Sample thumbnail with slight blur at edges
+      thumbnailColor = texture2D(thumbnailTexture, finalUv);
+      
+      // Fade thumbnail at edges for bubble effect
+      float edgeFade = smoothstep(0.85, 0.5, dist);
+      thumbnailColor.a *= edgeFade;
+    }
+    
+    // Iridescent soap bubble effect
+    float iridescence = sin(fresnel * 6.28 + time) * 0.5 + 0.5;
+    vec3 bubbleSheen = mix(
+      outlineColor,
+      vec3(1.0, 1.0, 1.0),
+      iridescence * 0.3
+    );
+    
+    // Outline glow at edges (fresnel effect)
+    vec3 outlineGlow = outlineColor * fresnel * 1.5;
+    
+    // Combine: thumbnail in center, bubble sheen overlay, outline at edges
+    vec3 finalColor = thumbnailColor.rgb * (1.0 - fresnel * 0.5);
+    finalColor += outlineGlow;
+    finalColor += bubbleSheen * fresnel * 0.4;
+    
+    // Transparency: more opaque in center (thumbnail), transparent at edges
+    float alpha = mix(0.95, 0.3, fresnel);
+    alpha = max(alpha, thumbnailColor.a * 0.9);
+    
+    gl_FragColor = vec4(finalColor, alpha);
+  }
+`;
 
 export function VideoConstellation({ videos, clusters, onNodeClick }: VideoConstellationProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -42,64 +115,69 @@ export function VideoConstellation({ videos, clusters, onNodeClick }: VideoConst
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const controlsRef = useRef<OrbitControls | null>(null);
   const nodesRef = useRef<Map<string, THREE.Mesh>>(new Map());
-  const glowMeshesRef = useRef<THREE.Mesh[]>([]);
+  const outlineRingsRef = useRef<THREE.Line[]>([]);
   const linesRef = useRef<THREE.Line[]>([]);
-  const starsRef = useRef<THREE.Points | null>(null);
   const animationRef = useRef<number>(0);
+  const textureLoaderRef = useRef<THREE.TextureLoader | null>(null);
+  const materialsRef = useRef<THREE.ShaderMaterial[]>([]);
+  const timeRef = useRef<number>(0);
   
   const [selectedNode, setSelectedNode] = useState<VideoNode | null>(null);
   const [isPlaying, setIsPlaying] = useState(true);
   const [hoveredNode, setHoveredNode] = useState<VideoNode | null>(null);
   const [webglError, setWebglError] = useState<string | null>(null);
 
-  // Create glass bubble material
-  const createGlassMaterial = useCallback((color: string, isHovered: boolean = false) => {
-    const baseColor = new THREE.Color(color);
-    return new THREE.MeshPhysicalMaterial({
-      color: baseColor,
-      metalness: 0.1,
-      roughness: 0.05,
-      transmission: isHovered ? 0.7 : 0.85,
-      thickness: 0.5,
-      envMapIntensity: 1.5,
-      clearcoat: 1.0,
-      clearcoatRoughness: 0.1,
-      ior: 1.5,
-      transparent: true,
-      opacity: isHovered ? 0.95 : 0.8,
-      side: THREE.DoubleSide,
+  // Create bubble material with thumbnail texture
+  const createBubbleMaterial = useCallback((thumbnailUrl: string, clusterColor: string) => {
+    const loader = textureLoaderRef.current || new THREE.TextureLoader();
+    textureLoaderRef.current = loader;
+    
+    // Load thumbnail texture
+    const texture = loader.load(thumbnailUrl, (tex) => {
+      tex.minFilter = THREE.LinearFilter;
+      tex.magFilter = THREE.LinearFilter;
     });
+    
+    const material = new THREE.ShaderMaterial({
+      uniforms: {
+        thumbnailTexture: { value: texture },
+        outlineColor: { value: new THREE.Color(clusterColor) },
+        time: { value: 0 },
+      },
+      vertexShader: bubbleVertexShader,
+      fragmentShader: bubbleFragmentShader,
+      transparent: true,
+      side: THREE.FrontSide,
+      depthWrite: false,
+    });
+    
+    materialsRef.current.push(material);
+    return material;
   }, []);
 
-  // Create glow effect
-  const createGlowMaterial = useCallback((color: string) => {
-    return new THREE.ShaderMaterial({
-      uniforms: {
-        glowColor: { value: new THREE.Color(color) },
-        viewVector: { value: new THREE.Vector3() },
-      },
-      vertexShader: `
-        uniform vec3 viewVector;
-        varying float intensity;
-        void main() {
-          vec3 vNormal = normalize(normalMatrix * normal);
-          vec3 vNormel = normalize(normalMatrix * viewVector);
-          intensity = pow(0.7 - dot(vNormal, vNormel), 2.0);
-          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-        }
-      `,
-      fragmentShader: `
-        uniform vec3 glowColor;
-        varying float intensity;
-        void main() {
-          vec3 glow = glowColor * intensity;
-          gl_FragColor = vec4(glow, intensity * 0.6);
-        }
-      `,
-      side: THREE.FrontSide,
-      blending: THREE.AdditiveBlending,
+  // Create outline ring
+  const createOutlineRing = useCallback((color: string, radius: number) => {
+    const segments = 64;
+    const points: THREE.Vector3[] = [];
+    
+    for (let i = 0; i <= segments; i++) {
+      const theta = (i / segments) * Math.PI * 2;
+      points.push(new THREE.Vector3(
+        Math.cos(theta) * radius,
+        Math.sin(theta) * radius,
+        0
+      ));
+    }
+    
+    const geometry = new THREE.BufferGeometry().setFromPoints(points);
+    const material = new THREE.LineBasicMaterial({
+      color: new THREE.Color(color),
       transparent: true,
+      opacity: 0.8,
+      linewidth: 2,
     });
+    
+    return new THREE.Line(geometry, material);
   }, []);
 
   // Initialize Three.js scene
@@ -110,9 +188,9 @@ export function VideoConstellation({ videos, clusters, onNodeClick }: VideoConst
     const width = container.clientWidth;
     const height = container.clientHeight;
 
-    // Scene
+    // Scene - clean dark background, no stars
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x0a0a1a);
+    scene.background = new THREE.Color(0x0d1117);
     sceneRef.current = scene;
 
     // Camera
@@ -120,7 +198,7 @@ export function VideoConstellation({ videos, clusters, onNodeClick }: VideoConst
     camera.position.set(0, 0, 50);
     cameraRef.current = camera;
 
-    // Renderer - with error handling for WebGL context failures
+    // Renderer
     let renderer: THREE.WebGLRenderer;
     try {
       renderer = new THREE.WebGLRenderer({ 
@@ -134,7 +212,6 @@ export function VideoConstellation({ videos, clusters, onNodeClick }: VideoConst
       return;
     }
     
-    // Check if context was created successfully
     if (!renderer.getContext()) {
       console.warn('WebGL context could not be created');
       setWebglError('WebGL context could not be created');
@@ -143,8 +220,6 @@ export function VideoConstellation({ videos, clusters, onNodeClick }: VideoConst
     
     renderer.setSize(width, height);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.2;
     container.appendChild(renderer.domElement);
     rendererRef.current = renderer;
 
@@ -154,62 +229,19 @@ export function VideoConstellation({ videos, clusters, onNodeClick }: VideoConst
     controls.dampingFactor = 0.05;
     controls.rotateSpeed = 0.5;
     controls.zoomSpeed = 0.8;
-    controls.minDistance = 10;
-    controls.maxDistance = 150;
+    controls.minDistance = 15;
+    controls.maxDistance = 120;
     controls.autoRotate = true;
-    controls.autoRotateSpeed = 0.3;
+    controls.autoRotateSpeed = 0.2;
     controlsRef.current = controls;
 
-    // Lights
-    const ambientLight = new THREE.AmbientLight(0x404080, 0.5);
+    // Soft ambient lighting
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
     scene.add(ambientLight);
 
-    const pointLight1 = new THREE.PointLight(0x6366f1, 2, 100);
-    pointLight1.position.set(30, 30, 30);
-    scene.add(pointLight1);
-
-    const pointLight2 = new THREE.PointLight(0x22d3ee, 1.5, 100);
-    pointLight2.position.set(-30, -20, 20);
-    scene.add(pointLight2);
-
-    const pointLight3 = new THREE.PointLight(0xf472b6, 1, 80);
-    pointLight3.position.set(0, 40, -30);
-    scene.add(pointLight3);
-
-    // Stars background
-    const starsGeometry = new THREE.BufferGeometry();
-    const starsCount = 2000;
-    const positions = new Float32Array(starsCount * 3);
-    const colors = new Float32Array(starsCount * 3);
-    
-    for (let i = 0; i < starsCount; i++) {
-      const i3 = i * 3;
-      positions[i3] = (Math.random() - 0.5) * 300;
-      positions[i3 + 1] = (Math.random() - 0.5) * 300;
-      positions[i3 + 2] = (Math.random() - 0.5) * 300;
-      
-      const brightness = 0.5 + Math.random() * 0.5;
-      colors[i3] = brightness;
-      colors[i3 + 1] = brightness;
-      colors[i3 + 2] = brightness + Math.random() * 0.2;
-    }
-    
-    starsGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    starsGeometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-    
-    const starsMaterial = new THREE.PointsMaterial({
-      size: 0.3,
-      vertexColors: true,
-      transparent: true,
-      opacity: 0.8,
-    });
-    
-    const stars = new THREE.Points(starsGeometry, starsMaterial);
-    scene.add(stars);
-    starsRef.current = stars;
-
-    // Nebula effect (subtle fog)
-    scene.fog = new THREE.FogExp2(0x0a0a2a, 0.008);
+    const directionalLight = new THREE.DirectionalLight(0xffffff, 0.4);
+    directionalLight.position.set(10, 10, 10);
+    scene.add(directionalLight);
 
     // Handle resize
     const handleResize = () => {
@@ -226,15 +258,26 @@ export function VideoConstellation({ videos, clusters, onNodeClick }: VideoConst
     const animate = () => {
       animationRef.current = requestAnimationFrame(animate);
       
-      // Rotate stars slowly
-      stars.rotation.y += 0.0001;
-      stars.rotation.x += 0.00005;
+      timeRef.current += 0.01;
       
-      // Pulse effect for nodes
-      const time = Date.now() * 0.001;
+      // Update shader uniforms for iridescence animation
+      materialsRef.current.forEach(material => {
+        if (material.uniforms.time) {
+          material.uniforms.time.value = timeRef.current;
+        }
+      });
+      
+      // Gentle floating animation for bubbles
       nodesRef.current.forEach((mesh, id) => {
-        const scale = 1 + Math.sin(time * 2 + parseInt(id, 36) % 10) * 0.05;
-        mesh.scale.setScalar(scale);
+        const offset = parseInt(id.replace(/\D/g, '') || '0', 10) % 10;
+        mesh.position.y += Math.sin(timeRef.current * 0.5 + offset) * 0.002;
+        
+        // Make outline rings face camera
+        const ring = outlineRingsRef.current.find(r => r.userData.nodeId === id);
+        if (ring) {
+          ring.position.copy(mesh.position);
+          ring.lookAt(camera.position);
+        }
       });
       
       controls.update();
@@ -242,7 +285,7 @@ export function VideoConstellation({ videos, clusters, onNodeClick }: VideoConst
     };
     animate();
 
-    // Raycaster for mouse interaction
+    // Raycaster for interaction
     const raycaster = new THREE.Raycaster();
     const mouse = new THREE.Vector2();
 
@@ -292,27 +335,18 @@ export function VideoConstellation({ videos, clusters, onNodeClick }: VideoConst
       container.removeEventListener('click', onClick);
       cancelAnimationFrame(animationRef.current);
       
-      // Dispose OrbitControls
       controls.dispose();
       
-      // Dispose stars
-      if (starsRef.current) {
-        starsRef.current.geometry.dispose();
-        if (starsRef.current.material instanceof THREE.Material) {
-          starsRef.current.material.dispose();
-        }
-      }
-      
-      // Dispose all glow meshes
-      glowMeshesRef.current.forEach(mesh => {
-        mesh.geometry.dispose();
-        if (mesh.material instanceof THREE.Material) {
-          mesh.material.dispose();
+      // Dispose outline rings
+      outlineRingsRef.current.forEach(ring => {
+        ring.geometry.dispose();
+        if (ring.material instanceof THREE.Material) {
+          ring.material.dispose();
         }
       });
-      glowMeshesRef.current = [];
+      outlineRingsRef.current = [];
       
-      // Dispose all lines
+      // Dispose lines
       linesRef.current.forEach(line => {
         line.geometry.dispose();
         if (line.material instanceof THREE.Material) {
@@ -321,50 +355,52 @@ export function VideoConstellation({ videos, clusters, onNodeClick }: VideoConst
       });
       linesRef.current = [];
       
-      // Dispose all node meshes
+      // Dispose nodes and materials
       nodesRef.current.forEach((mesh) => {
         mesh.geometry.dispose();
-        if (Array.isArray(mesh.material)) {
-          mesh.material.forEach(m => m.dispose());
-        } else {
+        if (mesh.material instanceof THREE.ShaderMaterial) {
+          if (mesh.material.uniforms.thumbnailTexture?.value) {
+            mesh.material.uniforms.thumbnailTexture.value.dispose();
+          }
           mesh.material.dispose();
         }
       });
       nodesRef.current.clear();
+      materialsRef.current = [];
       
       renderer.dispose();
       container.removeChild(renderer.domElement);
     };
   }, [onNodeClick]);
 
-  // Add video nodes to scene
+  // Add bubble nodes to scene
   useEffect(() => {
     if (!sceneRef.current) return;
     const scene = sceneRef.current;
 
-    // Clear existing nodes
+    // Clear existing
     nodesRef.current.forEach((mesh) => {
       scene.remove(mesh);
       mesh.geometry.dispose();
-      if (Array.isArray(mesh.material)) {
-        mesh.material.forEach(m => m.dispose());
-      } else {
+      if (mesh.material instanceof THREE.ShaderMaterial) {
+        if (mesh.material.uniforms.thumbnailTexture?.value) {
+          mesh.material.uniforms.thumbnailTexture.value.dispose();
+        }
         mesh.material.dispose();
       }
     });
     nodesRef.current.clear();
+    materialsRef.current = [];
 
-    // Clear existing glow meshes
-    glowMeshesRef.current.forEach(mesh => {
-      scene.remove(mesh);
-      mesh.geometry.dispose();
-      if (mesh.material instanceof THREE.Material) {
-        mesh.material.dispose();
+    outlineRingsRef.current.forEach(ring => {
+      scene.remove(ring);
+      ring.geometry.dispose();
+      if (ring.material instanceof THREE.Material) {
+        ring.material.dispose();
       }
     });
-    glowMeshesRef.current = [];
+    outlineRingsRef.current = [];
 
-    // Clear existing lines
     linesRef.current.forEach(line => {
       scene.remove(line);
       line.geometry.dispose();
@@ -374,20 +410,13 @@ export function VideoConstellation({ videos, clusters, onNodeClick }: VideoConst
     });
     linesRef.current = [];
 
-    // Create connection lines between nearby nodes
-    const linesMaterial = new THREE.LineBasicMaterial({
-      color: 0x3b4a6b,
-      transparent: true,
-      opacity: 0.3,
-    });
-
-    // Add nodes
+    // Add bubble nodes
     videos.forEach((video) => {
       const clusterColor = CLUSTER_COLORS[video.cluster % CLUSTER_COLORS.length];
       
-      // Main bubble
-      const geometry = new THREE.SphereGeometry(1.5, 32, 32);
-      const material = createGlassMaterial(clusterColor);
+      // Main bubble sphere with thumbnail
+      const geometry = new THREE.SphereGeometry(2, 64, 64);
+      const material = createBubbleMaterial(video.thumbnailUrl, clusterColor);
       const mesh = new THREE.Mesh(geometry, material);
       
       mesh.position.set(...video.position);
@@ -396,15 +425,18 @@ export function VideoConstellation({ videos, clusters, onNodeClick }: VideoConst
       scene.add(mesh);
       nodesRef.current.set(video.id, mesh);
 
-      // Inner glow sphere
-      const glowGeometry = new THREE.SphereGeometry(1.8, 16, 16);
-      const glowMaterial = createGlowMaterial(clusterColor);
-      const glowMesh = new THREE.Mesh(glowGeometry, glowMaterial);
-      glowMesh.position.copy(mesh.position);
-      scene.add(glowMesh);
-      glowMeshesRef.current.push(glowMesh);
+      // Colored outline ring
+      const outlineRing = createOutlineRing(clusterColor, 2.1);
+      outlineRing.position.copy(mesh.position);
+      outlineRing.userData = { nodeId: video.id };
+      scene.add(outlineRing);
+      outlineRingsRef.current.push(outlineRing);
+    });
 
-      // Connection lines to nearby nodes
+    // Connection lines between same-cluster or nearby videos
+    videos.forEach((video) => {
+      const clusterColor = CLUSTER_COLORS[video.cluster % CLUSTER_COLORS.length];
+      
       videos.forEach((otherVideo) => {
         if (video.id >= otherVideo.id) return;
         
@@ -415,20 +447,27 @@ export function VideoConstellation({ videos, clusters, onNodeClick }: VideoConst
         );
         
         // Connect if same cluster or very close
-        if (video.cluster === otherVideo.cluster || distance < 10) {
+        if (video.cluster === otherVideo.cluster || distance < 12) {
           const lineGeometry = new THREE.BufferGeometry().setFromPoints([
             new THREE.Vector3(...video.position),
             new THREE.Vector3(...otherVideo.position),
           ]);
-          const line = new THREE.Line(lineGeometry, linesMaterial);
+          
+          const lineMaterial = new THREE.LineBasicMaterial({
+            color: new THREE.Color(clusterColor),
+            transparent: true,
+            opacity: 0.4,
+          });
+          
+          const line = new THREE.Line(lineGeometry, lineMaterial);
           scene.add(line);
           linesRef.current.push(line);
         }
       });
     });
-  }, [videos, createGlassMaterial, createGlowMaterial]);
+  }, [videos, createBubbleMaterial, createOutlineRing]);
 
-  // Toggle auto-rotate
+  // Controls
   const toggleAutoRotate = () => {
     if (controlsRef.current) {
       controlsRef.current.autoRotate = !isPlaying;
@@ -436,7 +475,6 @@ export function VideoConstellation({ videos, clusters, onNodeClick }: VideoConst
     }
   };
 
-  // Reset camera
   const resetCamera = () => {
     if (cameraRef.current && controlsRef.current) {
       cameraRef.current.position.set(0, 0, 50);
@@ -444,7 +482,6 @@ export function VideoConstellation({ videos, clusters, onNodeClick }: VideoConst
     }
   };
 
-  // Zoom controls
   const zoomIn = () => {
     if (cameraRef.current) {
       cameraRef.current.position.multiplyScalar(0.8);
@@ -457,28 +494,33 @@ export function VideoConstellation({ videos, clusters, onNodeClick }: VideoConst
     }
   };
 
-  // Show fallback if WebGL is not available
+  // WebGL fallback
   if (webglError) {
     return (
-      <div className="relative w-full h-full min-h-[500px] rounded-lg overflow-hidden bg-[#0a0a1a] flex flex-col items-center justify-center text-center p-8">
+      <div className="relative w-full h-full min-h-[500px] rounded-lg overflow-hidden bg-[#0d1117] flex flex-col items-center justify-center text-center p-8">
         <Sparkles className="h-16 w-16 text-white/30 mb-4" />
-        <p className="text-white/60 text-lg mb-2">3D Visualization Unavailable</p>
+        <p className="text-white/60 text-lg mb-2">3D Filter Bubble Unavailable</p>
         <p className="text-white/40 text-sm max-w-md">
-          WebGL is required for the 3D constellation view. Your browser or environment may not support it.
+          WebGL is required for the filter bubble visualization.
         </p>
-        {/* Cluster legend as fallback */}
         <div className="mt-6 p-4 rounded-lg bg-white/5 border border-white/10">
           <p className="text-xs text-white/60 mb-3">Video Categories ({videos.length} videos)</p>
           <div className="flex flex-wrap gap-3 justify-center">
-            {clusters.map((cluster) => (
-              <div key={cluster.id} className="flex items-center gap-2">
-                <div
-                  className="w-3 h-3 rounded-full"
-                  style={{ backgroundColor: CLUSTER_COLORS[cluster.id % CLUSTER_COLORS.length] }}
-                />
-                <span className="text-xs text-white/80">{cluster.name}</span>
-              </div>
-            ))}
+            {clusters.map((cluster, index) => {
+              const color = CLUSTER_COLORS[index % CLUSTER_COLORS.length];
+              return (
+                <div key={cluster.id} className="flex items-center gap-2" data-testid={`cluster-legend-${cluster.id}`}>
+                  <div
+                    className="w-3 h-3 rounded-full bg-transparent"
+                    style={{ 
+                      border: `2px solid ${color}`,
+                      boxShadow: `0 0 4px ${color}40`,
+                    }}
+                  />
+                  <span className="text-xs text-white/80">{cluster.name}</span>
+                </div>
+              );
+            })}
           </div>
         </div>
       </div>
@@ -486,11 +528,11 @@ export function VideoConstellation({ videos, clusters, onNodeClick }: VideoConst
   }
 
   return (
-    <div className="relative w-full h-full min-h-[500px] rounded-lg overflow-hidden bg-[#0a0a1a]">
-      {/* 3D Canvas Container */}
+    <div className="relative w-full h-full min-h-[500px] rounded-lg overflow-hidden bg-[#0d1117]">
+      {/* 3D Canvas */}
       <div ref={containerRef} className="w-full h-full" data-testid="canvas-constellation" />
       
-      {/* Controls overlay */}
+      {/* Controls */}
       <div className="absolute top-4 left-4 flex flex-col gap-2">
         <Button
           size="icon"
@@ -532,17 +574,23 @@ export function VideoConstellation({ videos, clusters, onNodeClick }: VideoConst
 
       {/* Cluster legend */}
       <div className="absolute top-4 right-4 p-3 rounded-lg bg-black/60 backdrop-blur-sm border border-white/10">
-        <p className="text-xs text-white/60 mb-2">Categories</p>
+        <p className="text-xs text-white/60 mb-2">Filter Bubbles</p>
         <div className="flex flex-col gap-1.5">
-          {clusters.map((cluster) => (
-            <div key={cluster.id} className="flex items-center gap-2">
-              <div
-                className="w-3 h-3 rounded-full"
-                style={{ backgroundColor: CLUSTER_COLORS[cluster.id % CLUSTER_COLORS.length] }}
-              />
-              <span className="text-xs text-white/80">{cluster.name}</span>
-            </div>
-          ))}
+          {clusters.map((cluster, index) => {
+            const color = CLUSTER_COLORS[index % CLUSTER_COLORS.length];
+            return (
+              <div key={cluster.id} className="flex items-center gap-2" data-testid={`legend-${cluster.id}`}>
+                <div
+                  className="w-3 h-3 rounded-full bg-transparent"
+                  style={{ 
+                    border: `2px solid ${color}`,
+                    boxShadow: `0 0 4px ${color}40`,
+                  }}
+                />
+                <span className="text-xs text-white/80">{cluster.name}</span>
+              </div>
+            );
+          })}
         </div>
       </div>
 
@@ -559,11 +607,11 @@ export function VideoConstellation({ videos, clusters, onNodeClick }: VideoConst
               <p className="text-sm text-white font-medium line-clamp-2">{hoveredNode.title}</p>
               <p className="text-xs text-white/60 mt-1">{hoveredNode.channelName}</p>
               <Badge
-                className="mt-2 text-[10px]"
+                variant="outline"
+                className="mt-2 text-[10px] bg-transparent"
                 style={{ 
-                  backgroundColor: CLUSTER_COLORS[hoveredNode.cluster % CLUSTER_COLORS.length] + '40',
-                  color: CLUSTER_COLORS[hoveredNode.cluster % CLUSTER_COLORS.length],
                   borderColor: CLUSTER_COLORS[hoveredNode.cluster % CLUSTER_COLORS.length],
+                  color: CLUSTER_COLORS[hoveredNode.cluster % CLUSTER_COLORS.length],
                 }}
               >
                 {hoveredNode.clusterName}
@@ -573,7 +621,7 @@ export function VideoConstellation({ videos, clusters, onNodeClick }: VideoConst
         </div>
       )}
 
-      {/* Selected node detail panel */}
+      {/* Selected node panel */}
       {selectedNode && (
         <div className="absolute bottom-4 left-4 right-4 md:bottom-4 md:left-4 md:right-auto p-4 rounded-lg bg-black/90 backdrop-blur-md border border-white/20 max-w-sm">
           <button
@@ -592,11 +640,11 @@ export function VideoConstellation({ videos, clusters, onNodeClick }: VideoConst
               <p className="text-sm text-white font-medium">{selectedNode.title}</p>
               <p className="text-xs text-white/60 mt-1">{selectedNode.channelName}</p>
               <Badge
-                className="mt-2 text-xs"
+                variant="outline"
+                className="mt-2 text-xs bg-transparent"
                 style={{ 
-                  backgroundColor: CLUSTER_COLORS[selectedNode.cluster % CLUSTER_COLORS.length] + '40',
-                  color: CLUSTER_COLORS[selectedNode.cluster % CLUSTER_COLORS.length],
                   borderColor: CLUSTER_COLORS[selectedNode.cluster % CLUSTER_COLORS.length],
+                  color: CLUSTER_COLORS[selectedNode.cluster % CLUSTER_COLORS.length],
                 }}
               >
                 {selectedNode.clusterName}
@@ -618,7 +666,7 @@ export function VideoConstellation({ videos, clusters, onNodeClick }: VideoConst
 
       {/* Instructions */}
       <div className="absolute bottom-4 right-4 text-xs text-white/40">
-        Drag to rotate | Scroll to zoom | Click node for details
+        Drag to rotate | Scroll to zoom | Click bubble for details
       </div>
     </div>
   );

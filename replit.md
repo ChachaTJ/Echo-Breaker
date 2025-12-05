@@ -136,14 +136,17 @@ EchoBreaker is a web application + Chrome extension system designed to help user
   - Server-side selector caching with 24-hour TTL to reduce API costs
   - Client-side caching in chrome.storage.local for instant retrieval
   - API endpoint: `POST /api/analyze-dom` and `GET /api/selectors`
-- **NEW: 3D Video Constellation Visualization**
-  - Three.js WebGL rendering with glass bubble effect nodes
+- **NEW: 3D Filter Bubble Visualization**
+  - Three.js WebGL rendering with soap bubble effect nodes
+  - Thumbnails distorted inside transparent bubbles using fisheye shader
+  - Iridescent bubble effect with animated sheen
+  - Color coding on bubble outlines and connection lines only (not fills)
+  - Clean dark background (no stars/dust)
   - TF-IDF vector embeddings with PCA dimension reduction to 3D coordinates
   - K-means clustering for color-coded category groupings
   - Interactive OrbitControls with auto-rotate, zoom, pan
-  - Stars background with nebula fog effects
   - Hover tooltips and click-to-select video detail panels
-  - Connection lines between related videos (same cluster or nearby)
+  - Connection lines between related videos (same cluster)
   - Graceful WebGL fallback for unsupported environments
   - API endpoint: `GET /api/analysis/constellation`
 - **NEW: Developer Test Mode**
