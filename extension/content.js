@@ -192,15 +192,33 @@
       let channelName = 'Unknown';
       let isShort = false;
       
-      // Get video ID from content-id class or selectors
       const lockupModel = card.querySelector('.yt-lockup-view-model') || card;
       const lockupClasses = lockupModel.className || '';
-      const contentIdMatch = lockupClasses.match(/content-id-([a-zA-Z0-9_-]+)/);
-      if (contentIdMatch) {
-        videoId = contentIdMatch[1];
+      
+      // === Step 1: Try using provided videoIdSelector ===
+      if (selectors.videoIdSelector && !videoId) {
+        const linkEl = card.querySelector(selectors.videoIdSelector);
+        if (linkEl) {
+          const href = linkEl.getAttribute('href') || '';
+          const watchMatch = href.match(/[?&]v=([a-zA-Z0-9_-]+)/);
+          const shortsMatch = href.match(/\/shorts\/([a-zA-Z0-9_-]+)/);
+          if (watchMatch) videoId = watchMatch[1];
+          if (shortsMatch) {
+            videoId = shortsMatch[1];
+            isShort = true;
+          }
+        }
       }
       
-      // Fallback: get from href
+      // === Step 2: Get video ID from content-id class (YouTube Dec 2024 DOM) ===
+      if (!videoId) {
+        const contentIdMatch = lockupClasses.match(/content-id-([a-zA-Z0-9_-]+)/);
+        if (contentIdMatch) {
+          videoId = contentIdMatch[1];
+        }
+      }
+      
+      // === Step 3: Fallback - get from href links ===
       if (!videoId) {
         const watchLink = card.querySelector('a[href*="/watch?v="]');
         if (watchLink) {
@@ -210,7 +228,7 @@
         }
       }
       
-      // Check for shorts
+      // Check for shorts (various detection methods)
       const shortsLink = card.querySelector('a[href*="/shorts/"]');
       if (shortsLink) {
         isShort = true;
@@ -223,7 +241,7 @@
         isShort = true;
       }
       
-      // Get title using AI selector or fallbacks
+      // === Get title using provided selector or fallbacks ===
       if (selectors.titleSelector) {
         const titleEl = card.querySelector(selectors.titleSelector);
         if (titleEl) {
@@ -239,7 +257,7 @@
         if (span) title = span.textContent?.trim() || '';
       }
       
-      // Get channel using AI selector or fallbacks
+      // === Get channel using provided selector or fallbacks ===
       if (selectors.channelSelector) {
         const channelEl = card.querySelector(selectors.channelSelector);
         if (channelEl) channelName = channelEl.textContent?.trim() || 'Unknown';
