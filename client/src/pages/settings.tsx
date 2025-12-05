@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { useMutation } from "@tanstack/react-query";
-import { Settings as SettingsIcon, Download, Trash2, Moon, Sun, Monitor } from "lucide-react";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { Settings as SettingsIcon, Download, Trash2, Moon, Sun, Monitor, Cpu, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
@@ -28,6 +28,8 @@ import {
 import { useTheme } from "@/components/theme-provider";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { Badge } from "@/components/ui/badge";
+import { ScrollArea } from "@/components/ui/scroll-area";
 
 export default function Settings() {
   const { toast } = useToast();
@@ -37,6 +39,11 @@ export default function Settings() {
   const [syncInterval, setSyncInterval] = useState([15]);
   const [diversityLevel, setDiversityLevel] = useState([50]);
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
+
+  // AI Selector Discovery - fetch cached selectors
+  const { data: cachedSelectors, isLoading: selectorsLoading, refetch: refetchSelectors } = useQuery<Record<string, string>>({
+    queryKey: ['/api/selectors'],
+  });
 
   const clearDataMutation = useMutation({
     mutationFn: () => apiRequest('DELETE', '/api/data/all'),
@@ -317,6 +324,82 @@ export default function Settings() {
                 >
                   How to install
                 </a>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <CardTitle className="flex items-center gap-2">
+                  <Cpu className="h-5 w-5" />
+                  AI Selector Discovery
+                </CardTitle>
+                <CardDescription>
+                  Monitor AI-powered DOM selector detection (Gemini)
+                </CardDescription>
+              </div>
+              <Button 
+                variant="outline" 
+                size="icon"
+                onClick={() => refetchSelectors()}
+                disabled={selectorsLoading}
+                data-testid="button-refresh-selectors"
+              >
+                <RefreshCw className={`h-4 w-4 ${selectorsLoading ? 'animate-spin' : ''}`} />
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <Label>Cached Selectors</Label>
+                <Badge variant="secondary">
+                  {cachedSelectors ? Object.keys(cachedSelectors).length : 0} cached
+                </Badge>
+              </div>
+              
+              {selectorsLoading ? (
+                <div className="text-sm text-muted-foreground">Loading...</div>
+              ) : cachedSelectors && Object.keys(cachedSelectors).length > 0 ? (
+                <ScrollArea className="h-[200px] rounded-md border p-3">
+                  <div className="space-y-3">
+                    {Object.entries(cachedSelectors).map(([key, selector]) => (
+                      <div key={key} className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          <Badge variant="outline" className="text-xs font-mono">
+                            {key}
+                          </Badge>
+                        </div>
+                        <code className="block text-xs bg-muted p-2 rounded font-mono break-all">
+                          {selector}
+                        </code>
+                      </div>
+                    ))}
+                  </div>
+                </ScrollArea>
+              ) : (
+                <div className="text-sm text-muted-foreground border rounded-md p-4 text-center">
+                  No AI-generated selectors cached yet.
+                  <br />
+                  <span className="text-xs">
+                    Selectors will appear here when YouTube DOM changes and AI discovers new ones.
+                  </span>
+                </div>
+              )}
+
+              <Separator />
+
+              <div className="space-y-2">
+                <Label>How it works</Label>
+                <ul className="text-sm text-muted-foreground space-y-1 list-disc list-inside">
+                  <li>Extension tries cached selectors first</li>
+                  <li>Falls back to default selectors if cache misses</li>
+                  <li>After 2+ failures, AI (Gemini) analyzes the page</li>
+                  <li>New selectors are cached for 24 hours</li>
+                </ul>
               </div>
             </div>
           </CardContent>
