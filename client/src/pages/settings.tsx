@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Settings as SettingsIcon, Download, Trash2, Moon, Sun, Monitor, Cpu, RefreshCw } from "lucide-react";
+import { Settings as SettingsIcon, Download, Trash2, Moon, Sun, Monitor, Cpu, RefreshCw, Wifi, WifiOff, Activity, Video, Users, ThumbsUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
@@ -44,6 +44,49 @@ export default function Settings() {
   const { data: cachedSelectors, isLoading: selectorsLoading, refetch: refetchSelectors } = useQuery<Record<string, string>>({
     queryKey: ['/api/selectors'],
   });
+
+  // Extension connection status
+  interface ExtensionStatus {
+    appVersion: string;
+    extensionConnected: boolean;
+    extensionVersion: string | null;
+    lastSeen: string | null;
+    userAgent: string | null;
+  }
+  const { data: extensionStatus, refetch: refetchExtensionStatus } = useQuery<ExtensionStatus>({
+    queryKey: ['/api/extension/status'],
+    refetchInterval: 10000, // Refresh every 10 seconds
+  });
+
+  // Data collection logs
+  interface CollectionLog {
+    timestamp: string;
+    type: 'videos' | 'subscriptions' | 'recommended';
+    count: number;
+    source: string;
+  }
+  interface CollectionData {
+    logs: CollectionLog[];
+    totalCollected: {
+      videos: number;
+      subscriptions: number;
+      recommended: number;
+    };
+  }
+  const { data: collectionData, refetch: refetchCollection } = useQuery<CollectionData>({
+    queryKey: ['/api/collection/logs'],
+    refetchInterval: 15000, // Refresh every 15 seconds
+  });
+
+  const formatTimeAgo = (dateString: string | null) => {
+    if (!dateString) return 'Never';
+    const date = new Date(dateString);
+    const seconds = Math.floor((Date.now() - date.getTime()) / 1000);
+    if (seconds < 60) return `${seconds}s ago`;
+    if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+    if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
+    return `${Math.floor(seconds / 86400)}d ago`;
+  };
 
   const clearDataMutation = useMutation({
     mutationFn: () => apiRequest('DELETE', '/api/data/all'),
@@ -102,6 +145,150 @@ export default function Settings() {
       </div>
 
       <div className="grid gap-6">
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <CardTitle className="flex items-center gap-2">
+                  {extensionStatus?.extensionConnected ? (
+                    <Wifi className="h-5 w-5 text-green-500" />
+                  ) : (
+                    <WifiOff className="h-5 w-5 text-muted-foreground" />
+                  )}
+                  Extension Status
+                </CardTitle>
+                <CardDescription>
+                  Connection status with Chrome extension
+                </CardDescription>
+              </div>
+              <Button 
+                variant="outline" 
+                size="icon"
+                onClick={() => refetchExtensionStatus()}
+                data-testid="button-refresh-extension-status"
+              >
+                <RefreshCw className="h-4 w-4" />
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <Label className="text-muted-foreground text-xs">Connection</Label>
+                  <div className="flex items-center gap-2">
+                    <div className={`h-2 w-2 rounded-full ${extensionStatus?.extensionConnected ? 'bg-green-500' : 'bg-muted-foreground'}`} />
+                    <span className="text-sm font-medium">
+                      {extensionStatus?.extensionConnected ? 'Connected' : 'Disconnected'}
+                    </span>
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-muted-foreground text-xs">Last Seen</Label>
+                  <span className="text-sm font-medium">
+                    {formatTimeAgo(extensionStatus?.lastSeen || null)}
+                  </span>
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-muted-foreground text-xs">Dashboard Version</Label>
+                  <Badge variant="secondary">{extensionStatus?.appVersion || '...'}</Badge>
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-muted-foreground text-xs">Extension Version</Label>
+                  <Badge variant="outline">
+                    {extensionStatus?.extensionVersion || 'Not detected'}
+                  </Badge>
+                </div>
+              </div>
+              
+              {!extensionStatus?.extensionConnected && (
+                <div className="text-sm text-muted-foreground border rounded-md p-3 bg-muted/50">
+                  Extension not connected. Make sure the Chrome extension is installed and you have visited YouTube recently.
+                </div>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <CardTitle className="flex items-center gap-2">
+                  <Activity className="h-5 w-5" />
+                  Data Collection
+                </CardTitle>
+                <CardDescription>
+                  Monitor data being collected from YouTube
+                </CardDescription>
+              </div>
+              <Button 
+                variant="outline" 
+                size="icon"
+                onClick={() => refetchCollection()}
+                data-testid="button-refresh-collection"
+              >
+                <RefreshCw className="h-4 w-4" />
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-4">
+              <div className="grid grid-cols-3 gap-3">
+                <div className="flex flex-col items-center p-3 rounded-md bg-muted/50">
+                  <Video className="h-5 w-5 mb-1 text-blue-500" />
+                  <span className="text-lg font-bold">{collectionData?.totalCollected?.videos || 0}</span>
+                  <span className="text-xs text-muted-foreground">Videos</span>
+                </div>
+                <div className="flex flex-col items-center p-3 rounded-md bg-muted/50">
+                  <Users className="h-5 w-5 mb-1 text-green-500" />
+                  <span className="text-lg font-bold">{collectionData?.totalCollected?.subscriptions || 0}</span>
+                  <span className="text-xs text-muted-foreground">Subscriptions</span>
+                </div>
+                <div className="flex flex-col items-center p-3 rounded-md bg-muted/50">
+                  <ThumbsUp className="h-5 w-5 mb-1 text-orange-500" />
+                  <span className="text-lg font-bold">{collectionData?.totalCollected?.recommended || 0}</span>
+                  <span className="text-xs text-muted-foreground">Recommended</span>
+                </div>
+              </div>
+
+              <Separator />
+
+              <div className="space-y-2">
+                <Label>Recent Activity</Label>
+                {collectionData?.logs && collectionData.logs.length > 0 ? (
+                  <ScrollArea className="h-[150px] rounded-md border p-2">
+                    <div className="space-y-2">
+                      {collectionData.logs.slice().reverse().slice(0, 20).map((log, index) => (
+                        <div key={index} className="flex items-center justify-between text-xs">
+                          <div className="flex items-center gap-2">
+                            {log.type === 'videos' && <Video className="h-3 w-3 text-blue-500" />}
+                            {log.type === 'subscriptions' && <Users className="h-3 w-3 text-green-500" />}
+                            {log.type === 'recommended' && <ThumbsUp className="h-3 w-3 text-orange-500" />}
+                            <span className="capitalize">{log.type}</span>
+                            <Badge variant="secondary" className="text-xs">+{log.count}</Badge>
+                          </div>
+                          <span className="text-muted-foreground">
+                            {formatTimeAgo(log.timestamp)}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </ScrollArea>
+                ) : (
+                  <div className="text-sm text-muted-foreground border rounded-md p-4 text-center">
+                    No data collected yet.
+                    <br />
+                    <span className="text-xs">
+                      Browse YouTube with the extension installed to start collecting data.
+                    </span>
+                  </div>
+                )}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
         <Card>
           <CardHeader>
             <CardTitle>Appearance</CardTitle>
