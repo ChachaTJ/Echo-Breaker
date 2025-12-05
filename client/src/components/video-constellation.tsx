@@ -42,6 +42,9 @@ export function VideoConstellation({ videos, clusters, onNodeClick }: VideoConst
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const controlsRef = useRef<OrbitControls | null>(null);
   const nodesRef = useRef<Map<string, THREE.Mesh>>(new Map());
+  const glowMeshesRef = useRef<THREE.Mesh[]>([]);
+  const linesRef = useRef<THREE.Line[]>([]);
+  const starsRef = useRef<THREE.Points | null>(null);
   const animationRef = useRef<number>(0);
   
   const [selectedNode, setSelectedNode] = useState<VideoNode | null>(null);
@@ -186,6 +189,7 @@ export function VideoConstellation({ videos, clusters, onNodeClick }: VideoConst
     
     const stars = new THREE.Points(starsGeometry, starsMaterial);
     scene.add(stars);
+    starsRef.current = stars;
 
     // Nebula effect (subtle fog)
     scene.fog = new THREE.FogExp2(0x0a0a2a, 0.008);
@@ -270,6 +274,47 @@ export function VideoConstellation({ videos, clusters, onNodeClick }: VideoConst
       container.removeEventListener('mousemove', onMouseMove);
       container.removeEventListener('click', onClick);
       cancelAnimationFrame(animationRef.current);
+      
+      // Dispose OrbitControls
+      controls.dispose();
+      
+      // Dispose stars
+      if (starsRef.current) {
+        starsRef.current.geometry.dispose();
+        if (starsRef.current.material instanceof THREE.Material) {
+          starsRef.current.material.dispose();
+        }
+      }
+      
+      // Dispose all glow meshes
+      glowMeshesRef.current.forEach(mesh => {
+        mesh.geometry.dispose();
+        if (mesh.material instanceof THREE.Material) {
+          mesh.material.dispose();
+        }
+      });
+      glowMeshesRef.current = [];
+      
+      // Dispose all lines
+      linesRef.current.forEach(line => {
+        line.geometry.dispose();
+        if (line.material instanceof THREE.Material) {
+          line.material.dispose();
+        }
+      });
+      linesRef.current = [];
+      
+      // Dispose all node meshes
+      nodesRef.current.forEach((mesh) => {
+        mesh.geometry.dispose();
+        if (Array.isArray(mesh.material)) {
+          mesh.material.forEach(m => m.dispose());
+        } else {
+          mesh.material.dispose();
+        }
+      });
+      nodesRef.current.clear();
+      
       renderer.dispose();
       container.removeChild(renderer.domElement);
     };
@@ -291,6 +336,26 @@ export function VideoConstellation({ videos, clusters, onNodeClick }: VideoConst
       }
     });
     nodesRef.current.clear();
+
+    // Clear existing glow meshes
+    glowMeshesRef.current.forEach(mesh => {
+      scene.remove(mesh);
+      mesh.geometry.dispose();
+      if (mesh.material instanceof THREE.Material) {
+        mesh.material.dispose();
+      }
+    });
+    glowMeshesRef.current = [];
+
+    // Clear existing lines
+    linesRef.current.forEach(line => {
+      scene.remove(line);
+      line.geometry.dispose();
+      if (line.material instanceof THREE.Material) {
+        line.material.dispose();
+      }
+    });
+    linesRef.current = [];
 
     // Create connection lines between nearby nodes
     const linesMaterial = new THREE.LineBasicMaterial({
@@ -320,6 +385,7 @@ export function VideoConstellation({ videos, clusters, onNodeClick }: VideoConst
       const glowMesh = new THREE.Mesh(glowGeometry, glowMaterial);
       glowMesh.position.copy(mesh.position);
       scene.add(glowMesh);
+      glowMeshesRef.current.push(glowMesh);
 
       // Connection lines to nearby nodes
       videos.forEach((otherVideo) => {
@@ -339,6 +405,7 @@ export function VideoConstellation({ videos, clusters, onNodeClick }: VideoConst
           ]);
           const line = new THREE.Line(lineGeometry, linesMaterial);
           scene.add(line);
+          linesRef.current.push(line);
         }
       });
     });
