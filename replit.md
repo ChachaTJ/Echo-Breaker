@@ -184,6 +184,22 @@ EchoBreaker is a web application + Chrome extension system designed to help user
   - Shows sample data (24 mock videos in 6 clusters) when enabled
   - Works even without real video data for UI/feature testing
   - Setting persisted in localStorage (`constellation-test-mode`)
+- **NEW: AI-Powered Diverse Recommendations Injection**
+  - Gemini AI analyzes user's viewing patterns to detect dominant political stance
+  - Automatically generates counter-perspective video recommendations
+  - Injects styled recommendation cards directly into YouTube DOM
+  - Cards appear in sidebar (watch page), home page, and search results
+  - Multiple DOM selectors with fallback for different YouTube layouts
+  - Retry mechanism for robust insertion on dynamic pages
+  - Automatic cleanup and re-injection on SPA navigation
+  - API endpoint: `POST /api/recommendations/diverse`
+- **NEW: Algorithm-Safe Viewing via youtube-nocookie.com**
+  - Context menu "Watch without affecting algorithm" uses youtube-nocookie.com
+  - Recommended videos link to youtube-nocookie.com embed URLs
+  - Piped.video as alternative privacy-preserving viewing option
+  - Opens in popup window for clean viewing experience
+  - Viewing doesn't save to watch history or affect recommendations
+  - Badge indicator shows "Algorithm-safe viewing" on injected cards
 
 ## Known Limitations
 - Chrome extension needs icon files (16x16, 48x48, 128x128 PNG) - removed from manifest to allow loading
