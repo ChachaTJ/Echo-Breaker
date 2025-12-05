@@ -7,7 +7,12 @@ import {
   insertSnapshotSchema,
   type CrawlDataPayload,
   type CategoryDistribution,
-  type InsertRecommendation
+  type InsertRecommendation,
+  type Video,
+  type StanceProbabilities,
+  type StanceBreakdown,
+  type SourceComparison,
+  type InsertVideoInsight
 } from "@shared/schema";
 import OpenAI from "openai";
 import { GoogleGenAI } from "@google/genai";
@@ -52,18 +57,190 @@ function isOpenAIAvailable(): boolean {
   return !!(process.env.AI_INTEGRATIONS_OPENAI_BASE_URL && process.env.AI_INTEGRATIONS_OPENAI_API_KEY);
 }
 
-// Initialize Gemini client with GOOGLE_API_KEY
+// Initialize Gemini client with Replit AI Integrations
 let gemini: GoogleGenAI | null = null;
 
 function getGeminiClient(): GoogleGenAI | null {
-  if (!gemini && process.env.GOOGLE_API_KEY) {
-    gemini = new GoogleGenAI({ apiKey: process.env.GOOGLE_API_KEY });
+  if (!gemini && process.env.AI_INTEGRATIONS_GEMINI_BASE_URL && process.env.AI_INTEGRATIONS_GEMINI_API_KEY) {
+    gemini = new GoogleGenAI({ 
+      apiKey: process.env.AI_INTEGRATIONS_GEMINI_API_KEY,
+      httpOptions: { baseUrl: process.env.AI_INTEGRATIONS_GEMINI_BASE_URL }
+    });
   }
   return gemini;
 }
 
 function isGeminiAvailable(): boolean {
-  return !!process.env.GOOGLE_API_KEY;
+  return !!(process.env.AI_INTEGRATIONS_GEMINI_BASE_URL && process.env.AI_INTEGRATIONS_GEMINI_API_KEY);
+}
+
+// Video content analysis result from Gemini
+interface VideoAnalysisResult {
+  contentType: string;
+  isPolitical: boolean;
+  stance: 'progressive' | 'conservative' | 'centrist' | 'non-political';
+  stanceProbabilities: StanceProbabilities;
+  topics: string[];
+  sentiment: 'positive' | 'negative' | 'neutral';
+}
+
+// Analyze a batch of videos using Gemini for stance detection
+async function analyzeVideosWithGemini(videos: Video[]): Promise<Map<string, VideoAnalysisResult>> {
+  const geminiClient = getGeminiClient();
+  const results = new Map<string, VideoAnalysisResult>();
+  
+  if (!geminiClient || videos.length === 0) {
+    return results;
+  }
+
+  // Process in batches of 10 for efficiency
+  const batchSize = 10;
+  for (let i = 0; i < videos.length; i += batchSize) {
+    const batch = videos.slice(i, i + batchSize);
+    
+    const videoDescriptions = batch.map((v, idx) => 
+      `[${idx + 1}] Title: "${v.title}" | Channel: "${v.channelName}" | Category: "${v.category || 'Unknown'}"`
+    ).join('\n');
+    
+    const prompt = `You are a media bias analyst. Analyze these YouTube videos and classify each one.
+
+Videos to analyze:
+${videoDescriptions}
+
+For EACH video, provide:
+1. contentType: One of [political, news, entertainment, education, tech, lifestyle, gaming, music, sports, other]
+2. isPolitical: true if the video discusses political topics, policies, elections, social issues
+3. stance: Political stance - one of [progressive, conservative, centrist, non-political]
+   - progressive: Left-leaning, liberal perspectives
+   - conservative: Right-leaning, traditional perspectives  
+   - centrist: Balanced, moderate, or truly neutral
+   - non-political: No political content
+4. stanceProbabilities: Probability distribution (must sum to 1.0):
+   {"progressive": 0.0-1.0, "conservative": 0.0-1.0, "centrist": 0.0-1.0, "nonPolitical": 0.0-1.0}
+5. topics: Array of 2-3 main topics
+6. sentiment: Overall tone [positive, negative, neutral]
+
+IMPORTANT: Be nuanced. Most entertainment/tech/gaming content is non-political.
+Only mark as political if there's clear political discourse or bias.
+
+Respond in JSON format:
+{
+  "analyses": [
+    {
+      "index": 1,
+      "contentType": "string",
+      "isPolitical": boolean,
+      "stance": "string",
+      "stanceProbabilities": {"progressive": 0.0, "conservative": 0.0, "centrist": 0.0, "nonPolitical": 1.0},
+      "topics": ["topic1", "topic2"],
+      "sentiment": "string"
+    }
+  ]
+}`;
+
+    try {
+      const response = await geminiClient.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: prompt,
+        config: {
+          responseMimeType: "application/json"
+        }
+      });
+
+      const responseText = response.text || '{}';
+      const parsed = JSON.parse(responseText);
+      
+      if (parsed.analyses && Array.isArray(parsed.analyses)) {
+        parsed.analyses.forEach((analysis: any) => {
+          const videoIndex = (analysis.index || 1) - 1;
+          if (batch[videoIndex]) {
+            const video = batch[videoIndex];
+            results.set(video.videoId, {
+              contentType: analysis.contentType || 'other',
+              isPolitical: analysis.isPolitical || false,
+              stance: analysis.stance || 'non-political',
+              stanceProbabilities: analysis.stanceProbabilities || {
+                progressive: 0, conservative: 0, centrist: 0, nonPolitical: 1
+              },
+              topics: analysis.topics || [],
+              sentiment: analysis.sentiment || 'neutral'
+            });
+          }
+        });
+      }
+    } catch (error) {
+      console.error("Gemini video analysis error:", error);
+      // Continue with other batches even if one fails
+    }
+    
+    // Small delay between batches to avoid rate limiting
+    if (i + batchSize < videos.length) {
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
+  }
+  
+  return results;
+}
+
+// Calculate Shannon Entropy for stance diversity
+// H = -Σ(p_i * ln(p_i)) where p_i is the proportion of content in each stance
+// Returns 0-100 score where 100 = maximum diversity (equal distribution)
+function calculateShannonEntropy(stanceBreakdown: StanceBreakdown): number {
+  const categories = ['progressive', 'conservative', 'centrist', 'nonPolitical'] as const;
+  const totalCount = categories.reduce((sum, cat) => 
+    sum + (stanceBreakdown[cat === 'nonPolitical' ? 'nonPolitical' : cat]?.count || 0), 0
+  );
+  
+  if (totalCount === 0) return 50; // Default for empty data
+  
+  // Calculate probabilities
+  const probabilities = categories.map(cat => {
+    const count = stanceBreakdown[cat === 'nonPolitical' ? 'nonPolitical' : cat]?.count || 0;
+    return count / totalCount;
+  }).filter(p => p > 0); // Only non-zero probabilities
+  
+  // Shannon entropy: H = -Σ(p * ln(p))
+  const entropy = -probabilities.reduce((sum, p) => sum + p * Math.log(p), 0);
+  
+  // Maximum entropy for 4 categories = ln(4) ≈ 1.386
+  const maxEntropy = Math.log(categories.length);
+  
+  // Normalize to 0-100 scale
+  const normalizedEntropy = (entropy / maxEntropy) * 100;
+  
+  return Math.round(normalizedEntropy);
+}
+
+// Build stance breakdown from video insights
+function buildStanceBreakdown(
+  videos: Video[], 
+  analysisResults: Map<string, VideoAnalysisResult>
+): StanceBreakdown {
+  const counts = {
+    progressive: 0,
+    conservative: 0,
+    centrist: 0,
+    nonPolitical: 0
+  };
+  
+  videos.forEach(video => {
+    const analysis = analysisResults.get(video.videoId);
+    if (analysis) {
+      const stance = analysis.stance === 'non-political' ? 'nonPolitical' : analysis.stance;
+      counts[stance as keyof typeof counts]++;
+    } else {
+      counts.nonPolitical++;
+    }
+  });
+  
+  const total = videos.length || 1;
+  
+  return {
+    progressive: { count: counts.progressive, percentage: Math.round((counts.progressive / total) * 100) },
+    conservative: { count: counts.conservative, percentage: Math.round((counts.conservative / total) * 100) },
+    centrist: { count: counts.centrist, percentage: Math.round((counts.centrist / total) * 100) },
+    nonPolitical: { count: counts.nonPolitical, percentage: Math.round((counts.nonPolitical / total) * 100) }
+  };
 }
 
 export async function registerRoutes(
@@ -434,12 +611,30 @@ Your response (selector only):`;
               { name: "Other", count: Math.floor(videos.length * 0.1), percentage: 10, color: colors[4] },
             ];
 
+        // Try Gemini stance analysis even without OpenAI
+        let stanceBreakdown: StanceBreakdown | null = null;
+        let entropyScore: number | null = null;
+        
+        if (isGeminiAvailable()) {
+          try {
+            console.log("Running Gemini stance analysis (fallback mode)...");
+            const geminiResults = await analyzeVideosWithGemini(videos.slice(0, 50));
+            stanceBreakdown = buildStanceBreakdown(videos, geminiResults);
+            entropyScore = calculateShannonEntropy(stanceBreakdown);
+            console.log(`Fallback stance analysis complete. Entropy: ${entropyScore}`);
+          } catch (err) {
+            console.error("Gemini fallback analysis failed:", err);
+          }
+        }
+
         const analysis = await storage.createAnalysis({
           biasScore: 50,
           categories: categoriesWithColors,
           topTopics: channelNames.slice(0, 5),
           politicalLeaning: "center",
-          summary: `Analyzed ${videos.length} videos from ${channelNames.length} unique channels. Connect to OpenAI for detailed bias analysis.`,
+          summary: `Analyzed ${videos.length} videos from ${channelNames.length} unique channels. ${isGeminiAvailable() ? 'Stance analysis via Gemini.' : 'Connect to OpenAI for detailed bias analysis.'}`,
+          entropyScore,
+          stanceBreakdown,
         });
 
         return res.json(analysis);
@@ -500,18 +695,112 @@ Respond in JSON format:
         })
       );
 
+      // Also run Gemini stance analysis if available
+      let stanceBreakdown: StanceBreakdown | null = null;
+      let entropyScore: number | null = null;
+      
+      if (isGeminiAvailable()) {
+        try {
+          console.log("Running Gemini video stance analysis...");
+          const geminiResults = await analyzeVideosWithGemini(videos.slice(0, 100));
+          
+          // Store insights for each video
+          for (const [videoId, result] of geminiResults.entries()) {
+            const video = videos.find(v => v.videoId === videoId);
+            if (video) {
+              await storage.createVideoInsight({
+                videoId: video.id,
+                contentType: result.contentType,
+                isPolitical: result.isPolitical,
+                stanceProbabilities: result.stanceProbabilities,
+                topics: result.topics,
+                aiModel: 'gemini-2.5-flash',
+                usedTranscript: false,
+              });
+            }
+          }
+          
+          // Build stance breakdown and calculate entropy
+          stanceBreakdown = buildStanceBreakdown(videos, geminiResults);
+          entropyScore = calculateShannonEntropy(stanceBreakdown);
+          console.log(`Stance analysis complete. Entropy score: ${entropyScore}`);
+        } catch (geminiError) {
+          console.error("Gemini stance analysis failed:", geminiError);
+        }
+      }
+
       const analysis = await storage.createAnalysis({
         biasScore: analysisData.biasScore || 50,
         categories: categoriesWithColors,
         topTopics: analysisData.topTopics || [],
         politicalLeaning: analysisData.politicalLeaning || "center",
         summary: analysisData.summary || "Analysis complete.",
+        entropyScore,
+        stanceBreakdown,
       });
 
       res.json(analysis);
     } catch (error) {
       console.error("Analysis error:", error);
       res.status(500).json({ error: "Failed to run analysis" });
+    }
+  });
+  
+  // Video insights endpoint for getting stance analysis
+  app.get("/api/analysis/insights", async (req, res) => {
+    try {
+      const videos = await storage.getVideos();
+      const insights: Array<{ video: Video; insight: any }> = [];
+      
+      for (const video of videos) {
+        const insight = await storage.getVideoInsight(video.id);
+        if (insight) {
+          insights.push({ video, insight });
+        }
+      }
+      
+      res.json(insights);
+    } catch (error) {
+      console.error("Insights error:", error);
+      res.status(500).json({ error: "Failed to get insights" });
+    }
+  });
+  
+  // Analyze specific video with Gemini
+  app.post("/api/analysis/video/:videoId", async (req, res) => {
+    try {
+      const { videoId } = req.params;
+      const videos = await storage.getVideos();
+      const video = videos.find(v => v.videoId === videoId);
+      
+      if (!video) {
+        return res.status(404).json({ error: "Video not found" });
+      }
+      
+      if (!isGeminiAvailable()) {
+        return res.status(503).json({ error: "Gemini not available" });
+      }
+      
+      const results = await analyzeVideosWithGemini([video]);
+      const result = results.get(videoId);
+      
+      if (result) {
+        const insight = await storage.createVideoInsight({
+          videoId: video.id,
+          contentType: result.contentType,
+          isPolitical: result.isPolitical,
+          stanceProbabilities: result.stanceProbabilities,
+          topics: result.topics,
+          aiModel: 'gemini-2.5-flash',
+          usedTranscript: false,
+        });
+        res.json(insight);
+      } else {
+        res.status(500).json({ error: "Failed to analyze video" });
+      }
+    } catch (error) {
+      console.error("Video analysis error:", error);
+      res.status(500).json({ error: "Failed to analyze video" });
     }
   });
 
@@ -582,7 +871,9 @@ Respond in JSON format:
               ((hash >> 16) % 100) / 5 - 10
             ] as [number, number, number],
             cluster: i % 5,
-            clusterName: video.category || 'Unknown'
+            clusterName: video.category || 'Unknown',
+            sourcePhase: video.sourcePhase || 'home_feed',
+            significanceWeight: video.significanceWeight ?? 50
           };
         });
 
@@ -639,7 +930,7 @@ Respond in JSON format:
         clusterNames.push(topWord);
       }
 
-      // Build response with video nodes
+      // Build response with video nodes (including source phase for visual differentiation)
       const videoNodes = videos.map((video, i) => ({
         id: video.id.toString(),
         videoId: video.videoId,
@@ -648,7 +939,9 @@ Respond in JSON format:
         thumbnailUrl: video.thumbnailUrl || `https://img.youtube.com/vi/${video.videoId}/mqdefault.jpg`,
         position: scaledPositions[i] || [0, 0, 0],
         cluster: clusterResult.clusters[i],
-        clusterName: clusterNames[clusterResult.clusters[i]] || 'Unknown'
+        clusterName: clusterNames[clusterResult.clusters[i]] || 'Unknown',
+        sourcePhase: video.sourcePhase || 'home_feed',
+        significanceWeight: video.significanceWeight ?? 50
       }));
 
       const clusters = clusterNames.map((name, i) => ({

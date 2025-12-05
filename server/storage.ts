@@ -6,6 +6,7 @@ import {
   type AnalysisResult, type InsertAnalysis,
   type Recommendation, type InsertRecommendation,
   type PlaylistItem, type InsertPlaylistItem,
+  type VideoInsight, type InsertVideoInsight,
   type DashboardStats
 } from "@shared/schema";
 import { randomUUID } from "crypto";
@@ -60,6 +61,13 @@ export interface IStorage {
   deletePlaylistItems(ids: string[]): Promise<void>;
   deleteAllPlaylistItems(): Promise<void>;
 
+  // Video Insights
+  getVideoInsights(): Promise<VideoInsight[]>;
+  getVideoInsight(videoId: string): Promise<VideoInsight | undefined>;
+  createVideoInsight(insight: InsertVideoInsight): Promise<VideoInsight>;
+  createVideoInsights(insights: InsertVideoInsight[]): Promise<VideoInsight[]>;
+  deleteAllVideoInsights(): Promise<void>;
+
   // Stats
   getStats(): Promise<DashboardStats>;
 
@@ -76,6 +84,7 @@ export class MemStorage implements IStorage {
   private analysisResults: AnalysisResult[];
   private recommendations: Map<string, Recommendation>;
   private playlistItems: Map<string, PlaylistItem>;
+  private videoInsights: Map<string, VideoInsight>;
 
   constructor() {
     this.users = new Map();
@@ -85,6 +94,7 @@ export class MemStorage implements IStorage {
     this.analysisResults = [];
     this.recommendations = new Map();
     this.playlistItems = new Map();
+    this.videoInsights = new Map();
   }
 
   // Users
@@ -128,6 +138,8 @@ export class MemStorage implements IStorage {
       duration: video.duration || null,
       category: video.category || null,
       tags: video.tags || null,
+      sourcePhase: (video.sourcePhase || 'home_feed') as Video['sourcePhase'],
+      significanceWeight: video.significanceWeight ?? 50,
     };
     this.videos.set(id, newVideo);
     return newVideo;
@@ -222,10 +234,14 @@ export class MemStorage implements IStorage {
       ...analysis, 
       id, 
       analyzedAt: new Date(),
-      categories: analysis.categories || null,
+      categories: (analysis.categories || null) as AnalysisResult['categories'],
       topTopics: analysis.topTopics || null,
       politicalLeaning: analysis.politicalLeaning || null,
       summary: analysis.summary || null,
+      entropyScore: analysis.entropyScore ?? null,
+      stanceBreakdown: analysis.stanceBreakdown || null,
+      sourceComparisons: analysis.sourceComparisons || null,
+      politicalVideoCount: analysis.politicalVideoCount ?? 0,
     };
     this.analysisResults.push(newAnalysis);
     return newAnalysis;
@@ -328,6 +344,44 @@ export class MemStorage implements IStorage {
     this.playlistItems.clear();
   }
 
+  // Video Insights
+  async getVideoInsights(): Promise<VideoInsight[]> {
+    return Array.from(this.videoInsights.values()).sort((a, b) => 
+      new Date(b.analyzedAt || 0).getTime() - new Date(a.analyzedAt || 0).getTime()
+    );
+  }
+
+  async getVideoInsight(videoId: string): Promise<VideoInsight | undefined> {
+    return Array.from(this.videoInsights.values()).find(i => i.videoId === videoId);
+  }
+
+  async createVideoInsight(insight: InsertVideoInsight): Promise<VideoInsight> {
+    const id = randomUUID();
+    const newInsight: VideoInsight = {
+      ...insight,
+      id,
+      analyzedAt: new Date(),
+      contentType: insight.contentType || null,
+      stance: insight.stance || null,
+      stanceProbabilities: insight.stanceProbabilities || null,
+      isPolitical: insight.isPolitical ?? false,
+      topics: insight.topics || null,
+      sentiment: insight.sentiment || null,
+      geminiModel: insight.geminiModel || null,
+      transcriptUsed: insight.transcriptUsed ?? false,
+    };
+    this.videoInsights.set(id, newInsight);
+    return newInsight;
+  }
+
+  async createVideoInsights(insights: InsertVideoInsight[]): Promise<VideoInsight[]> {
+    return Promise.all(insights.map(i => this.createVideoInsight(i)));
+  }
+
+  async deleteAllVideoInsights(): Promise<void> {
+    this.videoInsights.clear();
+  }
+
   // Stats
   async getStats(): Promise<DashboardStats> {
     const latestAnalysis = await this.getLatestAnalysis();
@@ -348,6 +402,7 @@ export class MemStorage implements IStorage {
       analysis: this.analysisResults,
       recommendations: await this.getRecommendations(),
       playlist: await this.getPlaylistItems(),
+      videoInsights: await this.getVideoInsights(),
       exportedAt: new Date().toISOString(),
     };
   }
@@ -359,6 +414,7 @@ export class MemStorage implements IStorage {
     await this.deleteAllAnalysis();
     await this.deleteAllRecommendations();
     await this.deleteAllPlaylistItems();
+    await this.deleteAllVideoInsights();
   }
 }
 

@@ -3,6 +3,9 @@ import { pgTable, text, varchar, integer, timestamp, jsonb, boolean } from "driz
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
+// Video source phase enum - where the video was collected from
+export type VideoSourcePhase = 'watch_history' | 'home_feed' | 'search' | 'recommended' | 'subscription';
+
 // Video data collected from YouTube
 export const videos = pgTable("videos", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -15,6 +18,8 @@ export const videos = pgTable("videos", {
   duration: text("duration"),
   category: text("category"),
   tags: text("tags").array(),
+  sourcePhase: text("source_phase").$type<VideoSourcePhase>().default('home_feed'),
+  significanceWeight: integer("significance_weight").default(50), // 0-100, watch_history=100, home_feed=50
   collectedAt: timestamp("collected_at").defaultNow(),
 });
 
@@ -52,6 +57,47 @@ export const insertSnapshotSchema = createInsertSchema(snapshots).omit({ id: tru
 export type InsertSnapshot = z.infer<typeof insertSnapshotSchema>;
 export type Snapshot = typeof snapshots.$inferSelect;
 
+// Video insights from Gemini AI analysis
+export const videoInsights = pgTable("video_insights", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  videoId: text("video_id").notNull(),
+  contentType: text("content_type"), // political, entertainment, education, news, lifestyle, tech, etc.
+  stance: text("stance"), // progressive, conservative, centrist, non-political
+  stanceProbabilities: jsonb("stance_probabilities").$type<StanceProbabilities>(),
+  isPolitical: boolean("is_political").default(false),
+  topics: text("topics").array(),
+  sentiment: text("sentiment"), // positive, negative, neutral
+  geminiModel: text("gemini_model"),
+  transcriptUsed: boolean("transcript_used").default(false),
+  analyzedAt: timestamp("analyzed_at").defaultNow(),
+});
+
+export const insertVideoInsightSchema = createInsertSchema(videoInsights).omit({ id: true, analyzedAt: true });
+export type InsertVideoInsight = z.infer<typeof insertVideoInsightSchema>;
+export type VideoInsight = typeof videoInsights.$inferSelect;
+
+// Stance probability distribution
+export interface StanceProbabilities {
+  progressive: number;
+  conservative: number;
+  centrist: number;
+  nonPolitical: number;
+}
+
+// Stance breakdown for analysis
+export interface StanceBreakdown {
+  progressive: { count: number; percentage: number };
+  conservative: { count: number; percentage: number };
+  centrist: { count: number; percentage: number };
+  nonPolitical: { count: number; percentage: number };
+}
+
+// Source comparison metrics
+export interface SourceComparison {
+  watchHistory: { count: number; entropyScore: number; stanceBreakdown: StanceBreakdown };
+  homeFeed: { count: number; entropyScore: number; stanceBreakdown: StanceBreakdown };
+}
+
 // Analysis results from AI
 export const analysisResults = pgTable("analysis_results", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -60,6 +106,11 @@ export const analysisResults = pgTable("analysis_results", {
   topTopics: text("top_topics").array(),
   politicalLeaning: text("political_leaning"), // left, center-left, center, center-right, right
   summary: text("summary"),
+  // New entropy-based diversity metrics
+  entropyScore: integer("entropy_score"), // 0-100, higher = more diverse viewpoints
+  stanceBreakdown: jsonb("stance_breakdown").$type<StanceBreakdown>(),
+  sourceComparisons: jsonb("source_comparisons").$type<SourceComparison>(),
+  politicalVideoCount: integer("political_video_count").default(0),
   analyzedAt: timestamp("analyzed_at").defaultNow(),
 });
 
@@ -130,6 +181,7 @@ export interface CrawlDataPayload {
   videos: InsertVideo[];
   subscriptions: InsertSubscription[];
   recommendedVideos: InsertVideo[];
+  watchHistoryVideos?: InsertVideo[]; // Videos from watch history (higher significance)
 }
 
 export interface AnalysisRequest {
