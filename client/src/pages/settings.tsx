@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Settings as SettingsIcon, Download, Trash2, Moon, Sun, Monitor, Cpu, RefreshCw, Wifi, WifiOff, Activity, Video, Users, ThumbsUp, Clock, Eye, ExternalLink } from "lucide-react";
+import { Settings as SettingsIcon, Download, Trash2, Moon, Sun, Monitor, Cpu, RefreshCw, Wifi, WifiOff, Activity, Video, Users, ThumbsUp, Clock, Eye, ExternalLink, FlaskConical } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
@@ -39,6 +39,15 @@ export default function Settings() {
   const [syncInterval, setSyncInterval] = useState([15]);
   const [diversityLevel, setDiversityLevel] = useState([50]);
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
+  
+  // Constellation test mode
+  const [constellationTestMode, setConstellationTestMode] = useState(() => {
+    return localStorage.getItem('constellation-test-mode') === 'true';
+  });
+
+  useEffect(() => {
+    localStorage.setItem('constellation-test-mode', constellationTestMode.toString());
+  }, [constellationTestMode]);
 
   // AI Selector Discovery - fetch cached selectors
   const { data: cachedSelectors, isLoading: selectorsLoading, refetch: refetchSelectors } = useQuery<Record<string, string>>({
@@ -448,6 +457,37 @@ export default function Settings() {
                 </SelectContent>
               </Select>
             </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <FlaskConical className="h-5 w-5" />
+              Developer Mode
+            </CardTitle>
+            <CardDescription>Test features without real data</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            <div className="flex items-center justify-between">
+              <div className="space-y-0.5">
+                <Label htmlFor="constellation-test">3D Constellation Test Mode</Label>
+                <p className="text-sm text-muted-foreground">
+                  Show sample data in the 3D visualization without real video data
+                </p>
+              </div>
+              <Switch
+                id="constellation-test"
+                checked={constellationTestMode}
+                onCheckedChange={setConstellationTestMode}
+                data-testid="switch-constellation-test"
+              />
+            </div>
+            {constellationTestMode && (
+              <div className="text-sm text-orange-600 dark:text-orange-400 bg-orange-500/10 rounded-md p-3">
+                Test mode is active. The Analysis page will show sample videos in the 3D constellation.
+              </div>
+            )}
           </CardContent>
         </Card>
 

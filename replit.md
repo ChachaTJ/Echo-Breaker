@@ -136,6 +136,21 @@ EchoBreaker is a web application + Chrome extension system designed to help user
   - Server-side selector caching with 24-hour TTL to reduce API costs
   - Client-side caching in chrome.storage.local for instant retrieval
   - API endpoint: `POST /api/analyze-dom` and `GET /api/selectors`
+- **NEW: 3D Video Constellation Visualization**
+  - Three.js WebGL rendering with glass bubble effect nodes
+  - TF-IDF vector embeddings with PCA dimension reduction to 3D coordinates
+  - K-means clustering for color-coded category groupings
+  - Interactive OrbitControls with auto-rotate, zoom, pan
+  - Stars background with nebula fog effects
+  - Hover tooltips and click-to-select video detail panels
+  - Connection lines between related videos (same cluster or nearby)
+  - Graceful WebGL fallback for unsupported environments
+  - API endpoint: `GET /api/analysis/constellation`
+- **NEW: Developer Test Mode**
+  - Toggle in Settings > Developer Mode to enable constellation test mode
+  - Shows sample data (24 mock videos in 6 clusters) when enabled
+  - Works even without real video data for UI/feature testing
+  - Setting persisted in localStorage (`constellation-test-mode`)
 
 ## Known Limitations
 - Chrome extension needs icon files (16x16, 48x48, 128x128 PNG) - removed from manifest to allow loading

@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { RotateCcw, ZoomIn, ZoomOut, Play, Pause, Maximize2, X } from 'lucide-react';
+import { RotateCcw, ZoomIn, ZoomOut, Play, Pause, Maximize2, X, Sparkles } from 'lucide-react';
 
 interface VideoNode {
   id: string;
@@ -50,6 +50,7 @@ export function VideoConstellation({ videos, clusters, onNodeClick }: VideoConst
   const [selectedNode, setSelectedNode] = useState<VideoNode | null>(null);
   const [isPlaying, setIsPlaying] = useState(true);
   const [hoveredNode, setHoveredNode] = useState<VideoNode | null>(null);
+  const [webglError, setWebglError] = useState<string | null>(null);
 
   // Create glass bubble material
   const createGlassMaterial = useCallback((color: string, isHovered: boolean = false) => {
@@ -119,11 +120,27 @@ export function VideoConstellation({ videos, clusters, onNodeClick }: VideoConst
     camera.position.set(0, 0, 50);
     cameraRef.current = camera;
 
-    // Renderer
-    const renderer = new THREE.WebGLRenderer({ 
-      antialias: true,
-      alpha: true,
-    });
+    // Renderer - with error handling for WebGL context failures
+    let renderer: THREE.WebGLRenderer;
+    try {
+      renderer = new THREE.WebGLRenderer({ 
+        antialias: true,
+        alpha: true,
+        failIfMajorPerformanceCaveat: false,
+      });
+    } catch (error) {
+      console.warn('WebGL not available:', error);
+      setWebglError('WebGL is not available in this environment');
+      return;
+    }
+    
+    // Check if context was created successfully
+    if (!renderer.getContext()) {
+      console.warn('WebGL context could not be created');
+      setWebglError('WebGL context could not be created');
+      return;
+    }
+    
     renderer.setSize(width, height);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -440,10 +457,38 @@ export function VideoConstellation({ videos, clusters, onNodeClick }: VideoConst
     }
   };
 
+  // Show fallback if WebGL is not available
+  if (webglError) {
+    return (
+      <div className="relative w-full h-full min-h-[500px] rounded-lg overflow-hidden bg-[#0a0a1a] flex flex-col items-center justify-center text-center p-8">
+        <Sparkles className="h-16 w-16 text-white/30 mb-4" />
+        <p className="text-white/60 text-lg mb-2">3D Visualization Unavailable</p>
+        <p className="text-white/40 text-sm max-w-md">
+          WebGL is required for the 3D constellation view. Your browser or environment may not support it.
+        </p>
+        {/* Cluster legend as fallback */}
+        <div className="mt-6 p-4 rounded-lg bg-white/5 border border-white/10">
+          <p className="text-xs text-white/60 mb-3">Video Categories ({videos.length} videos)</p>
+          <div className="flex flex-wrap gap-3 justify-center">
+            {clusters.map((cluster) => (
+              <div key={cluster.id} className="flex items-center gap-2">
+                <div
+                  className="w-3 h-3 rounded-full"
+                  style={{ backgroundColor: CLUSTER_COLORS[cluster.id % CLUSTER_COLORS.length] }}
+                />
+                <span className="text-xs text-white/80">{cluster.name}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="relative w-full h-full min-h-[500px] rounded-lg overflow-hidden bg-[#0a0a1a]">
       {/* 3D Canvas Container */}
-      <div ref={containerRef} className="w-full h-full" />
+      <div ref={containerRef} className="w-full h-full" data-testid="canvas-constellation" />
       
       {/* Controls overlay */}
       <div className="absolute top-4 left-4 flex flex-col gap-2">
