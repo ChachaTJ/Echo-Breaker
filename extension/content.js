@@ -88,6 +88,330 @@
       // Background might not be ready
     }
   }
+
+  // =============================================
+  // SELF-HEALING SCRAPER SYSTEM
+  // =============================================
+  
+  // HTML Diet Function - reduces tokens before sending to AI
+  function cleanHTML(htmlString) {
+    try {
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(htmlString, 'text/html');
+      
+      // Remove scripts, styles, SVG, images, paths, icons
+      const toRemove = doc.querySelectorAll('script, style, svg, img, path, yt-icon, iron-iconset-svg, noscript, link');
+      toRemove.forEach(el => el.remove());
+      
+      // Keep only essential attributes
+      const keepAttrs = ['id', 'class', 'href', 'title', 'aria-label', 'data-lockup-view-model-type'];
+      const allElements = doc.body.getElementsByTagName("*");
+      for (let el of allElements) {
+        const attrs = Array.from(el.attributes);
+        attrs.forEach(attr => {
+          if (!keepAttrs.includes(attr.name)) {
+            el.removeAttribute(attr.name);
+          }
+        });
+      }
+      
+      // Clean up whitespace and limit length
+      return doc.body.innerHTML.replace(/\s+/g, ' ').trim().slice(0, 4000);
+    } catch (e) {
+      return htmlString.slice(0, 4000);
+    }
+  }
+
+  // Get cached selectors from chrome.storage
+  async function getCachedSelectors(pageType) {
+    try {
+      const key = `selectors_${pageType}`;
+      const stored = await chrome.storage.local.get([key]);
+      if (stored[key] && stored[key].timestamp) {
+        // Cache valid for 24 hours
+        const age = Date.now() - stored[key].timestamp;
+        if (age < 24 * 60 * 60 * 1000) {
+          await log('info', `캐싱된 셀렉터 로드`, { pageType, age: Math.round(age / 60000) + '분' });
+          return stored[key].selectors;
+        }
+      }
+      return null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  // Save selectors to cache
+  async function cacheSelectors(pageType, selectors) {
+    try {
+      const key = `selectors_${pageType}`;
+      await chrome.storage.local.set({
+        [key]: {
+          selectors,
+          timestamp: Date.now()
+        }
+      });
+      await log('success', `셀렉터 캐싱 완료`, { pageType });
+    } catch (e) {
+      console.error('[EchoBreaker] Failed to cache selectors:', e);
+    }
+  }
+
+  // Request AI to analyze HTML and return selectors
+  async function requestAISelectors(htmlSnippet, pageType) {
+    try {
+      await log('info', `AI 셀렉터 분석 요청`, { pageType, htmlLen: htmlSnippet.length });
+      
+      const response = await fetch(`${CONFIG.SERVER_URL}/api/analyze-selectors`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ htmlSnippet, pageType })
+      });
+      
+      if (!response.ok) {
+        throw new Error(`Server error: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      if (data.selectors) {
+        await log('success', `AI 셀렉터 분석 성공`, data.selectors);
+        return data.selectors;
+      }
+      return null;
+    } catch (e) {
+      await log('error', `AI 셀렉터 분석 실패`, { error: e.message });
+      return null;
+    }
+  }
+
+  // Extract data from a card using selectors
+  function extractWithSelectors(card, selectors) {
+    try {
+      let videoId = null;
+      let title = '';
+      let channelName = 'Unknown';
+      let isShort = false;
+      
+      // Get video ID from content-id class or selectors
+      const lockupModel = card.querySelector('.yt-lockup-view-model') || card;
+      const lockupClasses = lockupModel.className || '';
+      const contentIdMatch = lockupClasses.match(/content-id-([a-zA-Z0-9_-]+)/);
+      if (contentIdMatch) {
+        videoId = contentIdMatch[1];
+      }
+      
+      // Fallback: get from href
+      if (!videoId) {
+        const watchLink = card.querySelector('a[href*="/watch?v="]');
+        if (watchLink) {
+          const href = watchLink.getAttribute('href');
+          const match = href.match(/[?&]v=([a-zA-Z0-9_-]+)/);
+          if (match) videoId = match[1];
+        }
+      }
+      
+      // Check for shorts
+      const shortsLink = card.querySelector('a[href*="/shorts/"]');
+      if (shortsLink) {
+        isShort = true;
+        if (!videoId) {
+          const match = shortsLink.getAttribute('href')?.match(/\/shorts\/([a-zA-Z0-9_-]+)/);
+          if (match) videoId = match[1];
+        }
+      }
+      if (lockupClasses.includes('yt-lockup-view-model--shorts')) {
+        isShort = true;
+      }
+      
+      // Get title using AI selector or fallbacks
+      if (selectors.titleSelector) {
+        const titleEl = card.querySelector(selectors.titleSelector);
+        if (titleEl) {
+          title = titleEl.getAttribute('title') || titleEl.textContent?.trim() || '';
+        }
+      }
+      if (!title) {
+        const h3 = card.querySelector('h3[title]');
+        if (h3) title = h3.getAttribute('title') || '';
+      }
+      if (!title) {
+        const span = card.querySelector('.yt-core-attributed-string');
+        if (span) title = span.textContent?.trim() || '';
+      }
+      
+      // Get channel using AI selector or fallbacks
+      if (selectors.channelSelector) {
+        const channelEl = card.querySelector(selectors.channelSelector);
+        if (channelEl) channelName = channelEl.textContent?.trim() || 'Unknown';
+      }
+      if (channelName === 'Unknown') {
+        const subtitleEl = card.querySelector('.yt-lockup-metadata-view-model__subtitle a');
+        if (subtitleEl) channelName = subtitleEl.textContent?.trim() || 'Unknown';
+      }
+      
+      if (!videoId) return null;
+      if (!title) title = 'Untitled';
+      
+      return { videoId, title, channelName, isShort };
+    } catch (e) {
+      return null;
+    }
+  }
+
+  // Extract all cards using selectors
+  function extractAllWithSelectors(cards, selectors) {
+    const videos = [];
+    const shorts = [];
+    
+    for (const card of cards) {
+      const result = extractWithSelectors(card, selectors);
+      if (result) {
+        const videoData = {
+          videoId: result.videoId,
+          title: result.title,
+          channelName: result.channelName,
+          thumbnailUrl: `https://img.youtube.com/vi/${result.videoId}/mqdefault.jpg`,
+          source: result.isShort ? 'shorts' : 'home_feed',
+          sourcePhase: result.isShort ? 'shorts' : 'home_feed',
+          collectedAt: new Date().toISOString()
+        };
+        
+        if (result.isShort) {
+          shorts.push(videoData);
+        } else {
+          videos.push(videoData);
+        }
+      }
+    }
+    
+    return { videos, shorts };
+  }
+
+  // Main Self-Healing Crawl Function
+  async function selfHealingCrawl(pageType = 'home') {
+    await log('info', `Self-Healing 크롤링 시작`, { pageType });
+    
+    // Determine card selector based on page type
+    let cardSelector = 'ytd-rich-item-renderer';
+    if (pageType === 'watch') {
+      cardSelector = 'ytd-compact-video-renderer';
+    } else if (pageType === 'search') {
+      cardSelector = 'ytd-video-renderer';
+    }
+    
+    const cards = document.querySelectorAll(cardSelector);
+    if (cards.length === 0) {
+      await log('warning', `영상 카드를 찾을 수 없음`, { cardSelector });
+      return { videos: [], shorts: [] };
+    }
+    
+    await log('info', `카드 ${cards.length}개 발견`);
+    
+    // Step 1: Try cached selectors
+    let selectors = await getCachedSelectors(pageType);
+    let videos = [];
+    let shorts = [];
+    
+    if (selectors) {
+      await log('info', `캐싱된 셀렉터로 추출 시도`);
+      const result = extractAllWithSelectors(cards, selectors);
+      videos = result.videos;
+      shorts = result.shorts;
+    }
+    
+    // Step 2: If failed, request AI analysis
+    if (videos.length === 0 && shorts.length === 0) {
+      await log('warning', `캐싱된 셀렉터 실패 - AI 분석 요청`);
+      
+      // Get sample HTML
+      const sampleCard = cards[0];
+      const rawHtml = sampleCard.outerHTML;
+      const cleanedHtml = cleanHTML(rawHtml);
+      
+      await log('info', `HTML 다이어트`, { 
+        before: rawHtml.length, 
+        after: cleanedHtml.length,
+        reduction: Math.round((1 - cleanedHtml.length / rawHtml.length) * 100) + '%'
+      });
+      
+      // Request AI selectors
+      selectors = await requestAISelectors(cleanedHtml, pageType);
+      
+      if (selectors) {
+        await cacheSelectors(pageType, selectors);
+        const result = extractAllWithSelectors(cards, selectors);
+        videos = result.videos;
+        shorts = result.shorts;
+      }
+    }
+    
+    // Step 3: Final fallback - hardcoded extraction
+    if (videos.length === 0 && shorts.length === 0) {
+      await log('warning', `AI도 실패 - 폴백 추출 사용`);
+      
+      for (const card of cards) {
+        try {
+          const lockupModel = card.querySelector('.yt-lockup-view-model') || card;
+          const lockupClasses = lockupModel.className || '';
+          
+          // Check for shorts
+          let isShort = lockupClasses.includes('yt-lockup-view-model--shorts') ||
+                        !!card.querySelector('a[href*="/shorts/"]');
+          
+          // Get video ID
+          let videoId = null;
+          const contentIdMatch = lockupClasses.match(/content-id-([a-zA-Z0-9_-]+)/);
+          if (contentIdMatch) videoId = contentIdMatch[1];
+          
+          if (!videoId) {
+            const link = card.querySelector('a[href*="/watch?v="], a[href*="/shorts/"]');
+            if (link) {
+              const href = link.getAttribute('href');
+              const watchMatch = href.match(/[?&]v=([a-zA-Z0-9_-]+)/);
+              const shortsMatch = href.match(/\/shorts\/([a-zA-Z0-9_-]+)/);
+              videoId = watchMatch?.[1] || shortsMatch?.[1];
+              if (shortsMatch) isShort = true;
+            }
+          }
+          
+          if (!videoId) continue;
+          
+          // Get title
+          let title = '';
+          const h3 = card.querySelector('h3[title]');
+          if (h3) title = h3.getAttribute('title');
+          if (!title) {
+            const span = card.querySelector('.yt-core-attributed-string');
+            if (span) title = span.textContent?.trim();
+          }
+          if (!title) title = 'Untitled';
+          
+          // Get channel
+          let channelName = 'Unknown';
+          const subtitleEl = card.querySelector('.yt-lockup-metadata-view-model__subtitle a');
+          if (subtitleEl) channelName = subtitleEl.textContent?.trim();
+          
+          const videoData = {
+            videoId,
+            title,
+            channelName,
+            thumbnailUrl: `https://img.youtube.com/vi/${videoId}/mqdefault.jpg`,
+            source: isShort ? 'shorts' : 'home_feed',
+            sourcePhase: isShort ? 'shorts' : 'home_feed',
+            collectedAt: new Date().toISOString()
+          };
+          
+          if (isShort) shorts.push(videoData);
+          else videos.push(videoData);
+        } catch (e) {
+          continue;
+        }
+      }
+    }
+    
+    await log('success', `Self-Healing 완료`, { videos: videos.length, shorts: shorts.length });
+    return { videos, shorts };
+  }
   
   // =============================================
   // Visual Feedback System

@@ -1,0 +1,180 @@
+Pobble 프로젝트(필터버블 완화 확장프로그램)에 이 방식을 적용한다면 정말 강력한 무기가 될 것입니다. 유튜브가 추천 알고리즘 UI를 잠수함 패치(A/B 테스트)하더라도, 확장프로그램이 스스로 UI 변화를 감지하고 적응할 수 있기 때문입니다.
+
+앞서 말씀드린 **"토큰 절약(비용 절감)"**과 **"속도 최적화(캐싱)"**가 적용된 실전용 코드로 업그레이드해 드리겠습니다.
+
+이 코드는 매번 AI를 호출하지 않고, 기존 선택자가 먹통이 되었을 때만 AI를 호출합니다.
+
+업그레이드된 파일 구성
+manifest.json에 storage 권한을 추가해야 합니다. (AI가 찾아낸 선택자를 브라우저에 기억시키기 위함)
+
+1. manifest.json (수정)
+JSON
+
+{
+  "manifest_version": 3,
+  "name": "Pobble: Self-Healing Crawler",
+  "version": "2.1",
+  "permissions": ["activeTab", "scripting", "storage"], 
+  "host_permissions": ["https://generativelanguage.googleapis.com/*"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": { "default_popup": "popup.html" },
+  "content_scripts": [
+    {
+      "matches": ["https://www.youtube.com/*"],
+      "js": ["content.js"]
+    }
+  ]
+}
+2. content.js (핵심: 자가 치유 로직 & HTML 다이어트)
+HTML을 통째로 보내면 토큰이 너무 많이 듭니다. svg, img 등 불필요한 태그를 제거하고 뼈대만 남겨서 AI에게 보내는 로직이 포함되어 있습니다.
+
+JavaScript
+
+// 저장된 선택자가 있는지 확인 후 크롤링 시도
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  if (request.action === "CRAWL_DATA") {
+    executeSmartCrawl().then(data => sendResponse({ result: data }));
+    return true; // 비동기 응답 필수
+  }
+});
+
+async function executeSmartCrawl() {
+  // 1. 저장된 선택자 불러오기
+  const stored = await chrome.storage.local.get(["cachedSelectors"]);
+  let selectors = stored.cachedSelectors;
+
+  // 2. 선택자로 데이터 추출 시도
+  let data = tryScrape(selectors);
+
+  // 3. 데이터가 0개면(실패하면) AI에게 물어보기 (Self-Healing)
+  if (data.length === 0) {
+    console.log("기존 선택자 작동 실패! AI에게 새로운 구조 분석 요청 중...");
+    
+    // HTML 다이어트 (토큰 절약)
+    const rawHtml = document.querySelector('ytd-rich-grid-media')?.outerHTML;
+    if (!rawHtml) return []; // 영상 카드가 아예 로딩 안 된 경우
+
+    const cleanHtml = cleanHTML(rawHtml); // 불필요한 태그 제거 함수
+
+    // Background로 HTML 전송
+    const response = await chrome.runtime.sendMessage({
+      action: "ANALYZE_HTML",
+      htmlSnippet: cleanHtml
+    });
+
+    if (response && response.selectors) {
+      selectors = response.selectors;
+      // 새로운 선택자를 저장 (캐싱)
+      await chrome.storage.local.set({ cachedSelectors: selectors });
+      console.log("새로운 선택자 학습 완료:", selectors);
+      
+      // 다시 크롤링 시도
+      data = tryScrape(selectors);
+    }
+  }
+
+  return data;
+}
+
+// 실제 DOM에서 데이터를 긁어오는 함수
+function tryScrape(selectors) {
+  if (!selectors) return [];
+  const results = [];
+  
+  // ytd-rich-grid-media는 유튜브 홈의 영상 카드 태그
+  document.querySelectorAll('ytd-rich-grid-media').forEach(card => {
+    try {
+      const title = card.querySelector(selectors.titleSelector)?.innerText.trim();
+      const channel = card.querySelector(selectors.channelSelector)?.innerText.trim();
+      const meta = card.querySelector(selectors.metaSelector)?.innerText.trim(); // 조회수 등
+      
+      if (title) results.push({ title, channel, meta });
+    } catch (e) {}
+  });
+  return results;
+}
+
+// [중요] AI에게 보낼 HTML을 가볍게 만드는 함수
+function cleanHTML(htmlString) {
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(htmlString, 'text/html');
+  
+  // 스크립트, 스타일, SVG, 이미지, 주석 제거
+  const toRemove = doc.querySelectorAll('script, style, svg, img, path');
+  toRemove.forEach(el => el.remove());
+
+  // 불필요한 속성 제거 (class와 id만 남김)
+  const allElements = doc.body.getElementsByTagName("*");
+  for (let el of allElements) {
+    const attrs = Array.from(el.attributes);
+    attrs.forEach(attr => {
+      if (attr.name !== 'id' && attr.name !== 'class') {
+        el.removeAttribute(attr.name);
+      }
+    });
+  }
+  
+  // 공백 정리 후 반환
+  return doc.body.innerHTML.replace(/\s+/g, ' ').slice(0, 3000); // 최대 3000자 제한
+}
+3. background.js (프롬프트 최적화)
+AI가 더 정확한 CSS Selector를 뱉어내도록 프롬프트를 다듬었습니다.
+
+JavaScript
+
+const API_KEY = "YOUR_GEMINI_API_KEY"; // API 키 입력
+
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  if (request.action === "ANALYZE_HTML") {
+    analyzeHTML(request.htmlSnippet).then(sendResponse);
+    return true;
+  }
+});
+
+async function analyzeHTML(htmlSnippet) {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${API_KEY}`;
+  
+  // 프롬프트: 구체적인 예시를 들어주는 것이 정확도가 높음
+  const prompt = `
+    I need to extract data from this Youtube HTML snippet. 
+    Find the most specific CSS selectors for:
+    1. "titleSelector": The video title text.
+    2. "channelSelector": The channel name.
+    3. "metaSelector": The line containing views and upload time (usually inside a span or div).
+
+    HTML Snippet:
+    ${htmlSnippet}
+
+    Output Requirement:
+    - Return ONLY valid JSON.
+    - Keys: "titleSelector", "channelSelector", "metaSelector".
+    - Do not use generic classes like "style-scope" or "ytd-rich-grid-media" if possible. Look for specific IDs like "#video-title" or unique classes.
+  `;
+
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+    });
+    
+    const data = await response.json();
+    const text = data.candidates[0].content.parts[0].text;
+    
+    // JSON 파싱 (마크다운 제거)
+    const jsonStr = text.replace(/```json|```/g, "").trim();
+    return { selectors: JSON.parse(jsonStr) };
+
+  } catch (error) {
+    console.error("Gemini 분석 실패:", error);
+    return { error: error.message };
+  }
+}
+Pobble 프로젝트 적용 시 팁
+필터버블 분석을 위한 추가 데이터:
+
+단순 제목/조회수 외에, 영상 카드에 붙어 있는 '알고리즘 추천 근거' 태그도 긁어오면 좋습니다. (예: "시청한 동영상과 관련", "맞춤 동영상" 등).
+
+AI 프롬프트에 4. "reasonSelector": Why this video is recommended 항목을 추가하면 이 정보도 식별해 낼 수 있습니다.
