@@ -854,6 +854,43 @@
       }
     }
 
+    // Log extraction results
+    await log('info', `추출 결과`, {
+      elements: allEls.length,
+      videos: videos.length,
+      shorts: shorts.length
+    });
+
+    // If we found elements but couldn't extract any videos, try AI extraction
+    if (allEls.length > 0 && videos.length === 0) {
+      await log('warning', `요소 ${allEls.length}개 발견했지만 추출 실패 - AI 추출 시작`);
+      const aiVideos = await extractVideosWithAI(pageType);
+      if (aiVideos.length > 0) {
+        await log('success', `AI 폴백 추출 성공`, { count: aiVideos.length });
+        for (const v of aiVideos) {
+          if (v.isShort && collectShortsEnabled) {
+            shorts.push({
+              videoId: v.videoId,
+              title: v.title,
+              channelName: v.channelName,
+              thumbnail: v.thumbnail,
+              sourcePhase: 'shorts',
+              collectedAt: new Date().toISOString()
+            });
+          } else if (!v.isShort) {
+            videos.push({
+              videoId: v.videoId,
+              title: v.title,
+              channelName: v.channelName,
+              thumbnail: v.thumbnail,
+              sourcePhase: 'home_feed',
+              collectedAt: new Date().toISOString()
+            });
+          }
+        }
+      }
+    }
+
     console.log('[EchoBreaker] Collected from home:', { videos: videos.length, shorts: shorts.length });
     return { videos, shorts };
   }
@@ -1143,12 +1180,31 @@
           viewCountText: viewCountText,
           duration: durationEl?.textContent?.trim() || null,
           source: 'sidebar_recommendation',
-          sourcePhase: 'recommended',  // Sidebar recommendations
-          significanceWeight: 35,      // Lower weight than watched videos
+          sourcePhase: 'recommended',
+          significanceWeight: 35,
           collectedAt: new Date().toISOString()
         });
       } catch (e) {
         // Skip
+      }
+    }
+
+    // If elements found but no videos extracted, try AI
+    if (videoEls.length > 0 && videos.length === 0) {
+      await log('warning', `사이드바 ${videoEls.length}개 요소 발견, 추출 실패 - AI 시도`);
+      const aiVideos = await extractVideosWithAI('watch');
+      if (aiVideos.length > 0) {
+        await log('success', `AI 사이드바 추출 성공`, { count: aiVideos.length });
+        return aiVideos.map(v => ({
+          videoId: v.videoId,
+          title: v.title,
+          channelName: v.channelName,
+          thumbnailUrl: v.thumbnail,
+          source: 'sidebar_recommendation',
+          sourcePhase: 'recommended',
+          significanceWeight: 35,
+          collectedAt: new Date().toISOString()
+        }));
       }
     }
 
