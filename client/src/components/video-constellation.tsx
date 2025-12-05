@@ -14,7 +14,7 @@ interface VideoNode {
   position: [number, number, number];
   cluster: number;
   clusterName: string;
-  sourcePhase?: 'home_feed' | 'watch_history' | 'subscriptions' | 'search' | 'recommended';
+  sourcePhase?: 'shorts' | 'video' | 'playlist' | 'home_feed' | 'watch_history' | 'subscriptions' | 'search' | 'recommended';
   significanceWeight?: number;
 }
 
@@ -26,6 +26,9 @@ interface VideoConstellationProps {
 
 // Source phase colors for visual differentiation
 const SOURCE_PHASE_COLORS: Record<string, string> = {
+  shorts: '#EC4899',        // pink - special shorts indicator
+  video: '#3B82F6',         // blue - regular video (solid ring)
+  playlist: '#8B5CF6',      // violet - playlist video
   watch_history: '#3B82F6', // blue - solid ring
   home_feed: '#22C55E',     // green - dashed ring
   subscriptions: '#A855F7', // purple - dotted ring
@@ -174,6 +177,9 @@ export function VideoConstellation({ videos, clusters, onNodeClick }: VideoConst
     // Different ring patterns based on source phase
     const skipPattern = (() => {
       switch (sourcePhase) {
+        case 'shorts': return { skip: 1, draw: 2 }; // short dashes for shorts
+        case 'video': return { skip: 0, draw: 8 }; // solid for regular video
+        case 'playlist': return { skip: 2, draw: 4 }; // medium dashed for playlist
         case 'home_feed': return { skip: 2, draw: 6 }; // dashed
         case 'subscriptions': return { skip: 1, draw: 3 }; // dotted
         case 'search': return { skip: 0, draw: 8 }; // double (will add inner ring)

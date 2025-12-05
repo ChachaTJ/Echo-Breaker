@@ -187,7 +187,12 @@
 
   function detectPageType() {
     const url = window.location.href;
-    if (url.includes('/watch')) return 'watch';
+    if (url.includes('/shorts/')) return 'shorts';
+    if (url.includes('/watch')) {
+      // Check if watching from a playlist
+      if (url.includes('list=')) return 'playlist';
+      return 'watch';
+    }
     if (url.includes('/feed/subscriptions')) return 'subscriptions';
     if (url.includes('/feed/history')) return 'history';
     if (url.includes('/@') || url.includes('/channel/')) return 'channel';
@@ -344,14 +349,28 @@
     try {
       const data = {
         videos: [],
+        shorts: [],
         subscriptions: [],
         recommendedVideos: []
       };
 
       if (pageType === 'home') {
-        data.recommendedVideos = await collectHomePageVideos();
+        // Collect both regular videos and shorts from home page
+        const homeContent = await collectHomePageContent();
+        data.recommendedVideos = homeContent.videos;
+        data.shorts = homeContent.shorts;
+      } else if (pageType === 'shorts') {
+        // Currently watching a short
+        const currentShort = await collectCurrentShort();
+        if (currentShort) data.shorts.push(currentShort);
+      } else if (pageType === 'playlist') {
+        // Watching from a playlist
+        const currentVideo = await collectCurrentVideo('playlist');
+        if (currentVideo) data.videos.push(currentVideo);
+        data.recommendedVideos = await collectSidebarRecommendations();
       } else if (pageType === 'watch') {
-        const currentVideo = await collectCurrentVideo();
+        // Regular video watch
+        const currentVideo = await collectCurrentVideo('video');
         if (currentVideo) data.videos.push(currentVideo);
         data.recommendedVideos = await collectSidebarRecommendations();
       } else if (pageType === 'subscriptions') {
@@ -362,9 +381,10 @@
 
       data.subscriptions = await collectSubscriptionChannels();
 
-      const totalItems = data.videos.length + data.recommendedVideos.length + data.subscriptions.length;
+      const totalItems = data.videos.length + data.shorts.length + data.recommendedVideos.length + data.subscriptions.length;
       console.log('[EchoBreaker] Collected:', {
         videos: data.videos.length,
+        shorts: data.shorts.length,
         recommended: data.recommendedVideos.length,
         subscriptions: data.subscriptions.length
       });
@@ -377,6 +397,7 @@
             type: 'SYNC_COMPLETE', 
             data: {
               videosCount: data.videos.length,
+              shortsCount: data.shorts.length,
               recommendedCount: data.recommendedVideos.length,
               subscriptionsCount: data.subscriptions.length
             }
@@ -391,7 +412,8 @@
     }
   }
 
-  async function collectCurrentVideo() {
+  // Collect current video being watched (regular video or from playlist)
+  async function collectCurrentVideo(sourcePhase = 'video') {
     try {
       const pageType = 'watch';
       const titleSelector = await getSelector('video_title', pageType);
@@ -400,8 +422,9 @@
       const titleEl = findElement(titleSelector);
       const channelEl = findElement(channelSelector);
       const videoId = new URLSearchParams(window.location.search).get('v');
+      const playlistId = new URLSearchParams(window.location.search).get('list');
 
-      console.log('[EchoBreaker] Current video - Title:', titleEl?.textContent?.substring(0, 30), 'ID:', videoId);
+      console.log('[EchoBreaker] Current video - Title:', titleEl?.textContent?.substring(0, 30), 'ID:', videoId, 'Source:', sourcePhase);
 
       if (!videoId) return null;
 
@@ -413,7 +436,10 @@
         thumbnailUrl: `https://img.youtube.com/vi/${videoId}/mqdefault.jpg`,
         viewCount: null,
         category: null,
-        tags: null
+        tags: null,
+        source: sourcePhase, // 'video' or 'playlist'
+        playlistId: playlistId || null,
+        collectedAt: new Date().toISOString()
       };
     } catch (e) {
       console.error('[EchoBreaker] Error collecting current video:', e);
@@ -421,96 +447,157 @@
     }
   }
 
-  async function collectHomePageVideos() {
+  // Collect current short being watched
+  async function collectCurrentShort() {
+    try {
+      const url = window.location.href;
+      const shortsMatch = url.match(/\/shorts\/([a-zA-Z0-9_-]+)/);
+      const videoId = shortsMatch ? shortsMatch[1] : null;
+      
+      if (!videoId) return null;
+      
+      // Get title and channel from Shorts player UI
+      const titleEl = findElement('h2.ytd-reel-video-renderer yt-formatted-string, yt-formatted-string.title, #shorts-title');
+      const channelEl = findElement('#channel-name a, ytd-channel-name a, .ytd-reel-video-renderer #channel-name');
+      
+      console.log('[EchoBreaker] Current short - ID:', videoId, 'Title:', titleEl?.textContent?.substring(0, 30));
+      
+      return {
+        videoId,
+        title: titleEl?.textContent?.trim() || document.title.replace(' - YouTube', ''),
+        channelName: channelEl?.textContent?.trim() || 'Unknown',
+        channelId: extractChannelId(channelEl?.href),
+        thumbnailUrl: `https://img.youtube.com/vi/${videoId}/mqdefault.jpg`,
+        viewCount: null,
+        duration: 'SHORT',
+        source: 'shorts',
+        collectedAt: new Date().toISOString()
+      };
+    } catch (e) {
+      console.error('[EchoBreaker] Error collecting current short:', e);
+      return null;
+    }
+  }
+
+  // Collect both regular videos and shorts from home page
+  async function collectHomePageContent() {
     const videos = [];
+    const shorts = [];
     const pageType = 'home';
     
-    // First try the :has() selector for modern browsers
-    let containerSelector = await getSelector('video_container', pageType);
-    let videoEls = findElements(containerSelector);
+    // Get all content items from home page
+    let allEls = Array.from(document.querySelectorAll('ytd-rich-item-renderer, ytd-video-renderer, ytd-reel-item-renderer'));
     
-    // Fallback: if :has() doesn't work, get all rich-item-renderers and filter manually
-    if (videoEls.length === 0) {
-      console.log('[EchoBreaker] :has() selector failed, using fallback...');
-      videoEls = Array.from(document.querySelectorAll('ytd-rich-item-renderer, ytd-video-renderer'));
-    }
-    
-    console.log('[EchoBreaker] Found home page video elements:', videoEls.length);
+    console.log('[EchoBreaker] Found home page content elements:', allEls.length);
 
-    for (let i = 0; i < Math.min(videoEls.length, CONFIG.MAX_VIDEOS); i++) {
-      const el = videoEls[i];
+    for (let i = 0; i < Math.min(allEls.length, CONFIG.MAX_VIDEOS * 2); i++) {
+      const el = allEls[i];
       try {
-        // Skip Shorts - they have ytd-rich-grid-slim-media or shorts in URL
-        const isShorts = el.querySelector('ytd-rich-grid-slim-media') !== null ||
-                         el.querySelector('[is-shorts]') !== null ||
-                         el.querySelector('ytd-reel-item-renderer') !== null;
-        if (isShorts) {
-          continue;
-        }
+        // Check if this is a Short
+        const isShorts = el.tagName.toLowerCase() === 'ytd-reel-item-renderer' ||
+                         el.querySelector('ytd-rich-grid-slim-media') !== null ||
+                         el.querySelector('[is-shorts]') !== null;
         
         // Also check for shorts shelf containers
         const closestShelf = el.closest('ytd-rich-shelf-renderer');
-        if (closestShelf && closestShelf.querySelector('[is-shorts]')) {
-          continue;
+        const isInShortsShelf = closestShelf && closestShelf.querySelector('[is-shorts]');
+        
+        if (isShorts || isInShortsShelf) {
+          // Collect as Short
+          const shortData = await extractShortFromElement(el);
+          if (shortData) {
+            shorts.push(shortData);
+          }
+        } else {
+          // Collect as regular Video
+          const videoData = await extractVideoFromElement(el);
+          if (videoData) {
+            videos.push(videoData);
+          }
         }
-        
-        const titleEl = findElement('#video-title, a#video-title-link, #video-title-link yt-formatted-string, h3 a#video-title', el);
-        const channelEl = findElement('#channel-name a, ytd-channel-name a, #text-container a, #text a', el);
-        const linkEl = findElement('a#thumbnail, a.ytd-thumbnail, ytd-thumbnail a, a[href*="/watch"]', el);
-        
-        // Extract additional metadata
-        const metadataEl = findElement('#metadata-line, ytd-video-meta-block, #metadata', el);
-        const viewCountEl = findElement('#metadata-line span:first-child, .inline-metadata-item:first-child, #metadata-line span', el);
-        const uploadTimeEl = findElement('#metadata-line span:last-child, .inline-metadata-item:last-child', el);
-        const durationEl = findElement('ytd-thumbnail-overlay-time-status-renderer span, #overlays span.ytd-thumbnail-overlay-time-status-renderer, span.ytd-thumbnail-overlay-time-status-renderer', el);
-        
-        // Get channel avatar
-        const avatarEl = findElement('#avatar-link img, yt-img-shadow img, #avatar img', el);
-
-        if (!titleEl) {
-          console.log('[EchoBreaker] No title element found in:', el.tagName, el.id);
-          continue;
-        }
-
-        const href = linkEl?.getAttribute('href') || titleEl?.getAttribute('href') || '';
-        
-        // Skip if this is a shorts link
-        if (href.includes('/shorts/')) {
-          continue;
-        }
-        
-        const videoId = extractVideoId(href);
-        if (!videoId) {
-          console.log('[EchoBreaker] No video ID extracted from:', href);
-          continue;
-        }
-
-        // Parse view count (e.g., "조회수 123만회" or "1.2M views")
-        const viewCountText = viewCountEl?.textContent?.trim() || '';
-        const viewCount = parseViewCount(viewCountText);
-
-        videos.push({
-          videoId,
-          title: titleEl.textContent?.trim() || '',
-          channelName: channelEl?.textContent?.trim() || 'Unknown',
-          channelId: extractChannelId(channelEl?.href),
-          channelAvatar: avatarEl?.src || null,
-          thumbnailUrl: `https://img.youtube.com/vi/${videoId}/mqdefault.jpg`,
-          viewCount: viewCount,
-          viewCountText: viewCountText,
-          uploadTime: uploadTimeEl?.textContent?.trim() || null,
-          duration: durationEl?.textContent?.trim() || null,
-          source: 'home_feed',
-          collectedAt: new Date().toISOString()
-        });
       } catch (e) {
-        console.log('[EchoBreaker] Error processing video element:', e.message);
-        // Skip this video
+        console.log('[EchoBreaker] Error processing element:', e.message);
       }
     }
 
-    console.log('[EchoBreaker] Collected home page videos (excluding shorts):', videos.length);
-    return videos;
+    console.log('[EchoBreaker] Collected from home:', { videos: videos.length, shorts: shorts.length });
+    return { videos, shorts };
+  }
+  
+  // Extract short data from a DOM element
+  async function extractShortFromElement(el) {
+    try {
+      const linkEl = findElement('a#thumbnail, a[href*="/shorts/"], a', el);
+      const titleEl = findElement('#video-title, #details h3, yt-formatted-string', el);
+      const channelEl = findElement('#channel-name, ytd-channel-name, #text', el);
+      
+      const href = linkEl?.getAttribute('href') || '';
+      const shortsMatch = href.match(/\/shorts\/([a-zA-Z0-9_-]+)/);
+      const videoId = shortsMatch ? shortsMatch[1] : null;
+      
+      if (!videoId) return null;
+      
+      return {
+        videoId,
+        title: titleEl?.textContent?.trim() || 'Short',
+        channelName: channelEl?.textContent?.trim() || 'Unknown',
+        channelId: extractChannelId(channelEl?.querySelector('a')?.href),
+        thumbnailUrl: `https://img.youtube.com/vi/${videoId}/mqdefault.jpg`,
+        duration: 'SHORT',
+        source: 'shorts',
+        collectedAt: new Date().toISOString()
+      };
+    } catch (e) {
+      return null;
+    }
+  }
+  
+  // Extract video data from a DOM element
+  async function extractVideoFromElement(el) {
+    try {
+      const titleEl = findElement('#video-title, a#video-title-link, #video-title-link yt-formatted-string, h3 a#video-title', el);
+      const channelEl = findElement('#channel-name a, ytd-channel-name a, #text-container a, #text a', el);
+      const linkEl = findElement('a#thumbnail, a.ytd-thumbnail, ytd-thumbnail a, a[href*="/watch"]', el);
+      
+      // Extract additional metadata
+      const viewCountEl = findElement('#metadata-line span:first-child, .inline-metadata-item:first-child, #metadata-line span', el);
+      const uploadTimeEl = findElement('#metadata-line span:last-child, .inline-metadata-item:last-child', el);
+      const durationEl = findElement('ytd-thumbnail-overlay-time-status-renderer span, #overlays span.ytd-thumbnail-overlay-time-status-renderer, span.ytd-thumbnail-overlay-time-status-renderer', el);
+      
+      // Get channel avatar
+      const avatarEl = findElement('#avatar-link img, yt-img-shadow img, #avatar img', el);
+
+      if (!titleEl) return null;
+
+      const href = linkEl?.getAttribute('href') || titleEl?.getAttribute('href') || '';
+      
+      // Skip if this is a shorts link (safety check)
+      if (href.includes('/shorts/')) return null;
+      
+      const videoId = extractVideoId(href);
+      if (!videoId) return null;
+
+      // Parse view count
+      const viewCountText = viewCountEl?.textContent?.trim() || '';
+      const viewCount = parseViewCount(viewCountText);
+
+      return {
+        videoId,
+        title: titleEl.textContent?.trim() || '',
+        channelName: channelEl?.textContent?.trim() || 'Unknown',
+        channelId: extractChannelId(channelEl?.href),
+        channelAvatar: avatarEl?.src || null,
+        thumbnailUrl: `https://img.youtube.com/vi/${videoId}/mqdefault.jpg`,
+        viewCount: viewCount,
+        viewCountText: viewCountText,
+        uploadTime: uploadTimeEl?.textContent?.trim() || null,
+        duration: durationEl?.textContent?.trim() || null,
+        source: 'home_feed',
+        collectedAt: new Date().toISOString()
+      };
+    } catch (e) {
+      return null;
+    }
   }
   
   // Helper to extract channel ID from URL

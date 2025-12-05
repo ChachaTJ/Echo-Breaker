@@ -33,7 +33,7 @@ let extensionConnection: ExtensionConnection | null = null;
 // Data collection logs
 interface CollectionLog {
   timestamp: Date;
-  type: 'videos' | 'subscriptions' | 'recommended';
+  type: 'videos' | 'shorts' | 'subscriptions' | 'recommended';
   count: number;
   source: string;
 }
@@ -349,8 +349,8 @@ export async function registerRoutes(
   // Bulk crawl data endpoint (for Chrome extension)
   app.post("/api/crawl", async (req, res) => {
     try {
-      const data = req.body as CrawlDataPayload;
-      let results = { videos: 0, subscriptions: 0, recommended: 0 };
+      const data = req.body as CrawlDataPayload & { shorts?: any[] };
+      let results = { videos: 0, shorts: 0, subscriptions: 0, recommended: 0 };
       
       // Update extension connection status
       extensionConnection = {
@@ -368,6 +368,26 @@ export async function registerRoutes(
           timestamp: new Date(),
           type: 'videos',
           count: data.videos.length,
+          source: 'extension',
+        });
+      }
+      
+      // Handle shorts separately - they are stored as videos but with source='shorts'
+      if (data.shorts && data.shorts.length > 0) {
+        // Transform shorts to video format with source phase
+        const shortsAsVideos = data.shorts.map((s: any) => ({
+          ...s,
+          sourcePhase: 'shorts',
+          significanceWeight: 40, // Shorts typically have lower significance
+        }));
+        await storage.createVideos(shortsAsVideos);
+        results.shorts = data.shorts.length;
+        
+        // Log collection
+        collectionLogs.push({
+          timestamp: new Date(),
+          type: 'shorts',
+          count: data.shorts.length,
           source: 'extension',
         });
       }
@@ -705,7 +725,7 @@ Respond in JSON format:
           const geminiResults = await analyzeVideosWithGemini(videos.slice(0, 100));
           
           // Store insights for each video
-          for (const [videoId, result] of geminiResults.entries()) {
+          for (const [videoId, result] of Array.from(geminiResults.entries())) {
             const video = videos.find(v => v.videoId === videoId);
             if (video) {
               await storage.createVideoInsight({
@@ -714,8 +734,8 @@ Respond in JSON format:
                 isPolitical: result.isPolitical,
                 stanceProbabilities: result.stanceProbabilities,
                 topics: result.topics,
-                aiModel: 'gemini-2.5-flash',
-                usedTranscript: false,
+                geminiModel: 'gemini-2.5-flash',
+                transcriptUsed: false,
               });
             }
           }
@@ -791,8 +811,8 @@ Respond in JSON format:
           isPolitical: result.isPolitical,
           stanceProbabilities: result.stanceProbabilities,
           topics: result.topics,
-          aiModel: 'gemini-2.5-flash',
-          usedTranscript: false,
+          geminiModel: 'gemini-2.5-flash',
+          transcriptUsed: false,
         });
         res.json(insight);
       } else {

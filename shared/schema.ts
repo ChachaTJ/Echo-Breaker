@@ -4,7 +4,15 @@ import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
 // Video source phase enum - where the video was collected from
-export type VideoSourcePhase = 'watch_history' | 'home_feed' | 'search' | 'recommended' | 'subscriptions';
+// shorts: YouTube Shorts
+// video: Regular YouTube videos
+// playlist: Videos watched from a playlist
+// watch_history: Videos from watch history page
+// home_feed: Videos from YouTube home page
+// search: Videos from search results
+// recommended: Videos from sidebar recommendations
+// subscriptions: Videos from subscriptions feed
+export type VideoSourcePhase = 'shorts' | 'video' | 'playlist' | 'watch_history' | 'home_feed' | 'search' | 'recommended' | 'subscriptions';
 
 // Video data collected from YouTube
 export const videos = pgTable("videos", {

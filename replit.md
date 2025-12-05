@@ -133,9 +133,12 @@ EchoBreaker is a web application + Chrome extension system designed to help user
   - 0-100 score (100 = maximum diversity, equal distribution)
   - Displayed in dedicated Viewpoint Diversity card
 - **NEW: Video Source Phase Tracking**
-  - Tracks where each video was discovered: watch_history, home_feed, subscriptions, search, recommended
+  - Tracks where each video was discovered with expanded source types
+  - Source phases: shorts, video, playlist, watch_history, home_feed, subscriptions, search, recommended
   - Different bubble ring styles in visualization:
-    - Watch History: solid blue ring
+    - Shorts: pink dashed ring (for YouTube Shorts)
+    - Video: solid blue ring (regular videos watched)
+    - Playlist: violet dashed ring (videos from playlists)
     - Home Feed: dashed green ring
     - Subscriptions: dotted purple ring
     - Search: double yellow ring

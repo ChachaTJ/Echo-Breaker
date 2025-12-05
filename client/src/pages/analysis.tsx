@@ -412,8 +412,16 @@ export default function Analysis() {
             <CardContent>
               <div className="flex flex-wrap gap-4">
                 <div className="flex items-center gap-2">
+                  <div className="w-4 h-4 rounded-full border border-pink-500" style={{ borderStyle: 'dashed' }} />
+                  <span className="text-sm">Shorts</span>
+                </div>
+                <div className="flex items-center gap-2">
                   <div className="w-4 h-4 rounded-full border-2 border-solid border-blue-500" />
-                  <span className="text-sm">Watch History</span>
+                  <span className="text-sm">Video</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-4 h-4 rounded-full border-2 border-dashed border-violet-500" />
+                  <span className="text-sm">Playlist</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <div className="w-4 h-4 rounded-full border-2 border-dashed border-green-500" />
