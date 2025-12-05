@@ -1,9 +1,9 @@
 // EchoBreaker Background Service Worker
 // Handles background tasks and messaging
 
-// Default settings
+// Default settings - Update this URL to your Replit app URL
 const DEFAULT_SETTINGS = {
-  apiUrl: 'http://localhost:5000',
+  apiUrl: 'https://046806e2-7cc7-45a7-8712-1a53ec91f00f-00-1k55bkxju0p0w.picard.replit.dev',
   autoSync: true,
   syncInterval: 15,
   lastSync: null,

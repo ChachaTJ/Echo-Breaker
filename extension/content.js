@@ -4,16 +4,17 @@
 (function() {
   'use strict';
 
-  // Configuration
+  // Configuration - Update this URL to your Replit app URL
   const CONFIG = {
     SYNC_INTERVAL: 15 * 60 * 1000, // 15 minutes
-    API_BASE_URL: '', // Will be set from storage
+    API_BASE_URL: 'https://046806e2-7cc7-45a7-8712-1a53ec91f00f-00-1k55bkxju0p0w.picard.replit.dev',
     MAX_VIDEOS: 50,
   };
 
   // State
   let lastSync = 0;
   let isCollecting = false;
+  let syncIntervalId = null;
 
   // Initialize
   async function init() {
@@ -21,7 +22,7 @@
     
     // Get API URL from storage
     const stored = await chrome.storage.local.get(['apiUrl', 'autoSync']);
-    CONFIG.API_BASE_URL = stored.apiUrl || 'http://localhost:5000';
+    CONFIG.API_BASE_URL = stored.apiUrl || CONFIG.API_BASE_URL;
     
     if (stored.autoSync !== false) {
       // Start periodic collection
@@ -30,9 +31,37 @@
 
     // Listen for messages from popup/background
     chrome.runtime.onMessage.addListener(handleMessage);
+    
+    // Listen for storage changes to handle auto-sync toggle
+    chrome.storage.onChanged.addListener((changes, area) => {
+      if (area === 'local') {
+        if (changes.apiUrl) {
+          CONFIG.API_BASE_URL = changes.apiUrl.newValue || CONFIG.API_BASE_URL;
+        }
+        if (changes.autoSync) {
+          if (changes.autoSync.newValue === false) {
+            // Stop auto-sync
+            if (syncIntervalId) {
+              clearInterval(syncIntervalId);
+              syncIntervalId = null;
+              console.log('[EchoBreaker] Auto-sync disabled');
+            }
+          } else {
+            // Start auto-sync
+            if (!syncIntervalId) {
+              scheduleCollection();
+              console.log('[EchoBreaker] Auto-sync enabled');
+            }
+          }
+        }
+      }
+    });
 
     // Collect initial data
     setTimeout(() => collectData(), 3000);
+    
+    // Try to flush any pending data
+    setTimeout(() => flushPendingData(), 5000);
   }
 
   function handleMessage(message, sender, sendResponse) {
@@ -50,12 +79,61 @@
   }
 
   function scheduleCollection() {
-    setInterval(() => {
+    if (syncIntervalId) {
+      clearInterval(syncIntervalId);
+    }
+    syncIntervalId = setInterval(async () => {
+      const stored = await chrome.storage.local.get(['autoSync']);
+      if (stored.autoSync === false) {
+        return; // Skip if auto-sync is disabled
+      }
       const now = Date.now();
       if (now - lastSync >= CONFIG.SYNC_INTERVAL) {
         collectData();
       }
     }, 60000); // Check every minute
+  }
+  
+  // Flush pending data from failed uploads
+  async function flushPendingData() {
+    try {
+      const stored = await chrome.storage.local.get(['pendingData']);
+      const pending = stored.pendingData || [];
+      
+      if (pending.length === 0) return;
+      
+      console.log(`[EchoBreaker] Attempting to flush ${pending.length} pending uploads`);
+      
+      const successfulIndices = [];
+      
+      for (let i = 0; i < pending.length; i++) {
+        const data = pending[i];
+        try {
+          const response = await fetch(`${CONFIG.API_BASE_URL}/api/crawl`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+          });
+          
+          if (response.ok) {
+            successfulIndices.push(i);
+            console.log(`[EchoBreaker] Successfully flushed pending upload ${i + 1}`);
+          }
+        } catch (e) {
+          console.log(`[EchoBreaker] Failed to flush pending upload ${i + 1}`);
+          break; // Stop trying if we're still offline
+        }
+      }
+      
+      // Remove successfully uploaded items
+      if (successfulIndices.length > 0) {
+        const remaining = pending.filter((_, i) => !successfulIndices.includes(i));
+        await chrome.storage.local.set({ pendingData: remaining });
+        console.log(`[EchoBreaker] Removed ${successfulIndices.length} items from pending queue`);
+      }
+    } catch (error) {
+      console.error('[EchoBreaker] Error flushing pending data:', error);
+    }
   }
 
   function detectPageType() {
@@ -343,6 +421,10 @@
       }
 
       console.log('[EchoBreaker] Data sent successfully');
+      
+      // Try to flush any pending data after successful sync
+      setTimeout(() => flushPendingData(), 1000);
+      
       return true;
     } catch (error) {
       console.error('[EchoBreaker] Failed to send data:', error);

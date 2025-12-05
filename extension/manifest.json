@@ -10,7 +10,10 @@
   ],
   "host_permissions": [
     "https://www.youtube.com/*",
-    "https://youtube.com/*"
+    "https://youtube.com/*",
+    "https://*.replit.dev/*",
+    "https://*.replit.app/*",
+    "http://localhost:5000/*"
   ],
   "action": {
     "default_popup": "popup.html"
@@ -23,7 +26,6 @@
     }
   ],
   "background": {
-    "service_worker": "background.js",
-    "type": "module"
+    "service_worker": "background.js"
   }
 }

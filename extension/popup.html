@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ko">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -14,7 +14,7 @@
     body {
       font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       width: 380px;
-      min-height: 400px;
+      min-height: 480px;
       background: #0f0f0f;
       color: #e5e5e5;
     }
@@ -86,8 +86,43 @@
       50% { opacity: 0.5; }
     }
 
+    .tabs {
+      display: flex;
+      border-bottom: 1px solid #262626;
+      background: #171717;
+    }
+
+    .tab {
+      flex: 1;
+      padding: 12px;
+      text-align: center;
+      font-size: 13px;
+      font-weight: 500;
+      color: #737373;
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      transition: all 0.2s;
+    }
+
+    .tab:hover {
+      color: #e5e5e5;
+    }
+
+    .tab.active {
+      color: #ef4444;
+      border-bottom-color: #ef4444;
+    }
+
     .content {
       padding: 16px;
+    }
+
+    .tab-content {
+      display: none;
+    }
+
+    .tab-content.active {
+      display: block;
     }
 
     .stats-grid {
@@ -206,6 +241,12 @@
       transform: translateY(-1px);
     }
 
+    .btn-primary:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      transform: none;
+    }
+
     .btn-secondary {
       background: #262626;
       color: #e5e5e5;
@@ -218,6 +259,105 @@
     .btn svg {
       width: 16px;
       height: 16px;
+    }
+
+    .settings-section {
+      margin-bottom: 20px;
+    }
+
+    .settings-label {
+      font-size: 12px;
+      color: #737373;
+      margin-bottom: 8px;
+      display: block;
+    }
+
+    .settings-input {
+      width: 100%;
+      padding: 10px 12px;
+      background: #171717;
+      border: 1px solid #262626;
+      border-radius: 8px;
+      color: #e5e5e5;
+      font-size: 13px;
+      outline: none;
+    }
+
+    .settings-input:focus {
+      border-color: #ef4444;
+    }
+
+    .settings-toggle {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px;
+      background: #171717;
+      border: 1px solid #262626;
+      border-radius: 8px;
+      margin-bottom: 12px;
+    }
+
+    .toggle-label {
+      font-size: 13px;
+    }
+
+    .toggle-switch {
+      width: 44px;
+      height: 24px;
+      background: #404040;
+      border-radius: 12px;
+      position: relative;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    .toggle-switch.active {
+      background: #22c55e;
+    }
+
+    .toggle-switch::after {
+      content: '';
+      position: absolute;
+      width: 20px;
+      height: 20px;
+      background: white;
+      border-radius: 50%;
+      top: 2px;
+      left: 2px;
+      transition: left 0.2s;
+    }
+
+    .toggle-switch.active::after {
+      left: 22px;
+    }
+
+    .info-box {
+      background: #171717;
+      border: 1px solid #262626;
+      border-radius: 8px;
+      padding: 12px;
+      margin-bottom: 16px;
+    }
+
+    .info-box h4 {
+      font-size: 13px;
+      margin-bottom: 8px;
+      color: #ef4444;
+    }
+
+    .info-box p {
+      font-size: 12px;
+      color: #737373;
+      line-height: 1.5;
+    }
+
+    .info-box code {
+      background: #262626;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-family: monospace;
+      font-size: 11px;
     }
 
     .footer {
@@ -259,11 +399,15 @@
       to { transform: rotate(360deg); }
     }
 
-    .message {
+    .success-message {
+      background: #22c55e20;
+      border: 1px solid #22c55e40;
+      color: #22c55e;
+      padding: 10px;
+      border-radius: 8px;
+      font-size: 12px;
       text-align: center;
-      padding: 20px;
-      color: #737373;
-      font-size: 13px;
+      margin-bottom: 12px;
     }
   </style>
 </head>
@@ -286,12 +430,13 @@
     </div>
   </div>
 
-  <div class="content" id="content">
-    <div class="loading" id="loading">
-      <div class="spinner"></div>
-    </div>
+  <div class="tabs">
+    <div class="tab active" data-tab="home">Home</div>
+    <div class="tab" data-tab="settings">Settings</div>
+  </div>
 
-    <div id="main-content" style="display: none;">
+  <div class="content">
+    <div class="tab-content active" id="tab-home">
       <div class="stats-grid">
         <div class="stat-card">
           <div class="stat-value" id="videos-count">0</div>
@@ -338,11 +483,41 @@
         </button>
       </div>
     </div>
+
+    <div class="tab-content" id="tab-settings">
+      <div class="info-box">
+        <h4>Server Connection</h4>
+        <p>Enter the URL of your EchoBreaker dashboard. This is where your YouTube data will be sent for analysis.</p>
+      </div>
+
+      <div class="settings-section">
+        <label class="settings-label">Dashboard URL</label>
+        <input type="text" class="settings-input" id="api-url" placeholder="https://your-replit-url.replit.dev">
+      </div>
+
+      <div class="settings-toggle">
+        <span class="toggle-label">Auto-sync when browsing YouTube</span>
+        <div class="toggle-switch active" id="auto-sync-toggle"></div>
+      </div>
+
+      <div id="save-success" class="success-message" style="display: none;">
+        Settings saved successfully!
+      </div>
+
+      <div class="actions">
+        <button class="btn btn-primary" id="save-settings-btn">
+          Save Settings
+        </button>
+        <button class="btn btn-secondary" id="test-connection-btn">
+          Test Connection
+        </button>
+      </div>
+    </div>
   </div>
 
   <div class="footer">
     <span id="last-sync">Last sync: Never</span>
-    <a href="#" id="settings-link">Settings</a>
+    <span>v1.0.0</span>
   </div>
 
   <script src="popup.js"></script>
