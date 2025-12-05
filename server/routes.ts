@@ -100,6 +100,138 @@ export async function registerRoutes(
     }
   });
 
+  // AI-powered DOM selector discovery endpoint
+  // Cached selectors to reduce LLM calls
+  const selectorCache: Map<string, { selector: string; timestamp: number }> = new Map();
+  const CACHE_TTL = 24 * 60 * 60 * 1000; // 24 hours
+
+  app.post("/api/analyze-dom", async (req, res) => {
+    try {
+      const { html, target, pageType } = req.body;
+      
+      if (!html || !target) {
+        return res.status(400).json({ error: "Missing html or target parameter" });
+      }
+
+      const cacheKey = `${pageType || 'unknown'}_${target}`;
+      
+      // Check cache first
+      const cached = selectorCache.get(cacheKey);
+      if (cached && (Date.now() - cached.timestamp) < CACHE_TTL) {
+        return res.json({ 
+          selector: cached.selector, 
+          source: 'cache',
+          cacheKey 
+        });
+      }
+
+      // Check if OpenAI is available
+      const client = getOpenAIClient();
+      if (!client) {
+        // Return default selectors as fallback
+        const defaultSelectors: Record<string, Record<string, string>> = {
+          video_title: {
+            watch: 'h1.ytd-watch-metadata yt-formatted-string, h1 yt-formatted-string',
+            home: '#video-title, a#video-title-link',
+            default: '#video-title'
+          },
+          channel_name: {
+            watch: '#owner #channel-name a, ytd-channel-name a',
+            home: '#channel-name a, ytd-channel-name a',
+            default: '#channel-name a'
+          },
+          video_link: {
+            watch: '',
+            home: 'a#thumbnail, a.ytd-thumbnail',
+            default: 'a#thumbnail'
+          },
+          video_container: {
+            home: 'ytd-rich-item-renderer, ytd-video-renderer',
+            subscriptions: 'ytd-grid-video-renderer, ytd-rich-item-renderer',
+            default: 'ytd-video-renderer'
+          },
+          sidebar_recommendations: {
+            watch: 'ytd-compact-video-renderer',
+            default: 'ytd-compact-video-renderer'
+          },
+          subscription_channels: {
+            default: 'ytd-guide-entry-renderer a[href*="/@"], ytd-guide-entry-renderer a[href*="/channel/"]'
+          }
+        };
+
+        const targetSelectors = defaultSelectors[target] || {};
+        const selector = targetSelectors[pageType] || targetSelectors['default'] || '';
+        
+        return res.json({ 
+          selector, 
+          source: 'fallback',
+          message: 'OpenAI not available, using default selectors'
+        });
+      }
+
+      // Use LLM to analyze DOM and find selector
+      const prompt = `You are a CSS selector expert. Analyze this HTML snippet from YouTube and provide the best CSS selector to find the "${target}".
+
+Page type: ${pageType || 'unknown'}
+Target element: ${target}
+
+HTML snippet (first 3000 chars):
+${html.substring(0, 3000)}
+
+Rules:
+1. Return ONLY a valid CSS selector string, nothing else
+2. Use robust selectors that are less likely to break (prefer IDs and data attributes)
+3. If multiple selectors work, separate them with comma
+4. Consider YouTube's custom elements (ytd-*, yt-formatted-string, etc.)
+
+Examples of good responses:
+- For video_title: "h1.ytd-watch-metadata yt-formatted-string"
+- For channel_name: "#owner #channel-name a"
+- For video_container: "ytd-rich-item-renderer, ytd-video-renderer"
+
+Your response (selector only):`;
+
+      const response = await client.chat.completions.create({
+        model: "gpt-4o-mini",
+        messages: [{ role: "user", content: prompt }],
+        max_tokens: 150,
+        temperature: 0.1
+      });
+
+      const selector = response.choices[0]?.message?.content?.trim() || '';
+      
+      if (selector && !selector.includes(' ') || selector.includes(',') || selector.includes('#') || selector.includes('.') || selector.includes('[')) {
+        // Cache the result
+        selectorCache.set(cacheKey, { selector, timestamp: Date.now() });
+        
+        res.json({ 
+          selector, 
+          source: 'ai',
+          cacheKey 
+        });
+      } else {
+        res.json({ 
+          selector: '', 
+          source: 'ai_failed',
+          message: 'LLM returned invalid selector'
+        });
+      }
+
+    } catch (error) {
+      console.error("DOM analysis error:", error);
+      res.status(500).json({ error: "Failed to analyze DOM" });
+    }
+  });
+
+  // Get cached selectors endpoint
+  app.get("/api/selectors", (req, res) => {
+    const selectors: Record<string, string> = {};
+    selectorCache.forEach((value, key) => {
+      selectors[key] = value.selector;
+    });
+    res.json(selectors);
+  });
+
   // Subscriptions endpoints
   app.get("/api/subscriptions", async (req, res) => {
     try {
