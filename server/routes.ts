@@ -10,8 +10,8 @@ import {
   type InsertRecommendation
 } from "@shared/schema";
 import OpenAI from "openai";
+import { GoogleGenAI } from "@google/genai";
 
-// the newest OpenAI model is "gpt-5" which was released August 7, 2025. do not change this unless explicitly requested by the user
 // Initialize OpenAI client with Replit AI Integrations
 let openai: OpenAI | null = null;
 
@@ -27,6 +27,20 @@ function getOpenAIClient(): OpenAI | null {
 
 function isOpenAIAvailable(): boolean {
   return !!(process.env.AI_INTEGRATIONS_OPENAI_BASE_URL && process.env.AI_INTEGRATIONS_OPENAI_API_KEY);
+}
+
+// Initialize Gemini client with GOOGLE_API_KEY
+let gemini: GoogleGenAI | null = null;
+
+function getGeminiClient(): GoogleGenAI | null {
+  if (!gemini && process.env.GOOGLE_API_KEY) {
+    gemini = new GoogleGenAI({ apiKey: process.env.GOOGLE_API_KEY });
+  }
+  return gemini;
+}
+
+function isGeminiAvailable(): boolean {
+  return !!process.env.GOOGLE_API_KEY;
 }
 
 export async function registerRoutes(
@@ -125,9 +139,9 @@ export async function registerRoutes(
         });
       }
 
-      // Check if OpenAI is available
-      const client = getOpenAIClient();
-      if (!client) {
+      // Check if Gemini is available (preferred for DOM analysis)
+      const geminiClient = getGeminiClient();
+      if (!geminiClient) {
         // Return default selectors as fallback
         const defaultSelectors: Record<string, Record<string, string>> = {
           video_title: {
@@ -165,11 +179,11 @@ export async function registerRoutes(
         return res.json({ 
           selector, 
           source: 'fallback',
-          message: 'OpenAI not available, using default selectors'
+          message: 'Gemini not available, using default selectors'
         });
       }
 
-      // Use LLM to analyze DOM and find selector
+      // Use Gemini LLM to analyze DOM and find selector
       const prompt = `You are a CSS selector expert. Analyze this HTML snippet from YouTube and provide the best CSS selector to find the "${target}".
 
 Page type: ${pageType || 'unknown'}
@@ -191,14 +205,12 @@ Examples of good responses:
 
 Your response (selector only):`;
 
-      const response = await client.chat.completions.create({
-        model: "gpt-4o-mini",
-        messages: [{ role: "user", content: prompt }],
-        max_tokens: 150,
-        temperature: 0.1
+      const response = await geminiClient.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: prompt,
       });
 
-      const selector = response.choices[0]?.message?.content?.trim() || '';
+      const selector = response.text?.trim() || '';
       
       if (selector && !selector.includes(' ') || selector.includes(',') || selector.includes('#') || selector.includes('.') || selector.includes('[')) {
         // Cache the result
