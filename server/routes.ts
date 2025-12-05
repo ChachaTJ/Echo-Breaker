@@ -820,6 +820,107 @@ Your response (selector only):`;
     res.json(selectors);
   });
 
+  // AI-powered direct video extraction from DOM
+  // This endpoint uses Gemini to directly extract video data from raw HTML
+  app.post("/api/extract-videos", async (req, res) => {
+    try {
+      const { html, pageType } = req.body;
+      
+      if (!html) {
+        return res.status(400).json({ error: "Missing html parameter" });
+      }
+
+      const geminiClient = getGeminiClient();
+      if (!geminiClient) {
+        return res.status(503).json({ 
+          error: "Gemini not available",
+          videos: []
+        });
+      }
+
+      // Truncate HTML to reasonable size for LLM
+      const truncatedHtml = html.substring(0, 15000);
+
+      const prompt = `You are a YouTube DOM analyzer. Extract ALL video information from this HTML snippet.
+
+Page type: ${pageType || 'home'}
+
+HTML:
+${truncatedHtml}
+
+INSTRUCTIONS:
+1. Find ALL videos/shorts visible in this HTML
+2. Extract: videoId (from URL like /watch?v=XXXXX or /shorts/XXXXX), title, channelName, thumbnail URL
+3. Look for patterns like:
+   - href="/watch?v=..." or href="/shorts/..."
+   - Video titles in elements like #video-title, yt-formatted-string, aria-label
+   - Channel names near each video
+   - Thumbnail images (img src with i.ytimg.com or yt3.ggpht.com)
+4. Return ONLY valid JSON array, no markdown, no explanation
+
+OUTPUT FORMAT (JSON array only):
+[
+  {
+    "videoId": "abc123xyz",
+    "title": "Video Title Here",
+    "channelName": "Channel Name",
+    "thumbnail": "https://i.ytimg.com/vi/abc123xyz/hqdefault.jpg",
+    "isShort": false
+  }
+]
+
+If no videos found, return: []
+
+Your response (JSON only):`;
+
+      console.log("[API] Calling Gemini for video extraction...");
+      
+      const response = await geminiClient.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: prompt,
+      });
+
+      let responseText = response.text?.trim() || '[]';
+      
+      // Clean up response - remove markdown code blocks if present
+      responseText = responseText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+      
+      try {
+        const videos = JSON.parse(responseText);
+        
+        if (!Array.isArray(videos)) {
+          console.log("[API] Gemini returned non-array:", responseText.substring(0, 200));
+          return res.json({ videos: [], source: 'ai_parse_error' });
+        }
+
+        // Validate and clean video data
+        const validVideos = videos.filter((v: any) => v.videoId && v.title).map((v: any) => ({
+          videoId: String(v.videoId),
+          title: String(v.title),
+          channelName: v.channelName ? String(v.channelName) : 'Unknown Channel',
+          thumbnail: v.thumbnail ? String(v.thumbnail) : `https://i.ytimg.com/vi/${v.videoId}/hqdefault.jpg`,
+          isShort: Boolean(v.isShort)
+        }));
+
+        console.log(`[API] Gemini extracted ${validVideos.length} videos`);
+        
+        res.json({ 
+          videos: validVideos, 
+          source: 'ai',
+          count: validVideos.length
+        });
+
+      } catch (parseError) {
+        console.error("[API] Failed to parse Gemini response:", responseText.substring(0, 500));
+        res.json({ videos: [], source: 'ai_parse_error', rawResponse: responseText.substring(0, 200) });
+      }
+
+    } catch (error) {
+      console.error("[API] Video extraction error:", error);
+      res.status(500).json({ error: "Failed to extract videos", videos: [] });
+    }
+  });
+
   // Subscriptions endpoints
   app.get("/api/subscriptions", async (req, res) => {
     try {

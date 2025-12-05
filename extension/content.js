@@ -687,6 +687,53 @@
     }
   }
 
+  // =============================================
+  // AI-Powered Video Extraction
+  // =============================================
+  
+  async function extractVideosWithAI(pageType) {
+    try {
+      // Get the main content area HTML
+      const contentArea = document.querySelector('ytd-rich-grid-renderer') || 
+                          document.querySelector('#contents') ||
+                          document.querySelector('ytd-browse') ||
+                          document.body;
+      
+      // Get outer HTML, limit to reasonable size
+      const html = contentArea.outerHTML.substring(0, 20000);
+      
+      await log('info', `AI에 DOM 전송 중...`, { htmlSize: html.length });
+      
+      const response = await fetch(`${CONFIG.API_BASE_URL}/api/extract-videos`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ html, pageType })
+      });
+      
+      if (!response.ok) {
+        await log('error', `AI 추출 API 오류: ${response.status}`);
+        return [];
+      }
+      
+      const result = await response.json();
+      
+      if (result.videos && result.videos.length > 0) {
+        await log('success', `AI가 ${result.videos.length}개 비디오 발견`, { 
+          source: result.source,
+          sample: result.videos[0]?.title?.substring(0, 30)
+        });
+        return result.videos;
+      } else {
+        await log('warning', `AI 추출 결과 없음`, { source: result.source });
+        return [];
+      }
+      
+    } catch (error) {
+      await log('error', `AI 추출 실패: ${error.message}`);
+      return [];
+    }
+  }
+
   // Collect current short being watched
   async function collectCurrentShort() {
     try {
@@ -742,6 +789,38 @@
     };
     
     await log('info', `홈 페이지 DOM 분석`, domStats);
+    
+    // If no elements found with default selectors, use AI extraction
+    if (allEls.length === 0) {
+      await log('warning', `기본 셀렉터 실패 - AI 추출 시작`);
+      const aiVideos = await extractVideosWithAI(pageType);
+      if (aiVideos.length > 0) {
+        await log('success', `AI 추출 성공`, { count: aiVideos.length });
+        // Convert AI extracted videos to our format
+        for (const v of aiVideos) {
+          if (v.isShort && collectShortsEnabled) {
+            shorts.push({
+              videoId: v.videoId,
+              title: v.title,
+              channelName: v.channelName,
+              thumbnail: v.thumbnail,
+              sourcePhase: 'shorts',
+              collectedAt: new Date().toISOString()
+            });
+          } else if (!v.isShort) {
+            videos.push({
+              videoId: v.videoId,
+              title: v.title,
+              channelName: v.channelName,
+              thumbnail: v.thumbnail,
+              sourcePhase: 'home_feed',
+              collectedAt: new Date().toISOString()
+            });
+          }
+        }
+        return { videos, shorts };
+      }
+    }
 
     for (let i = 0; i < Math.min(allEls.length, CONFIG.MAX_VIDEOS * 2); i++) {
       const el = allEls[i];
@@ -928,12 +1007,29 @@
     const containerSelector = await getSelector('sidebar_recommendations', pageType);
     const videoEls = findElements(containerSelector);
     
-    // Debug: Check sidebar DOM
-    console.log('[EchoBreaker] === SIDEBAR DEBUG ===');
-    console.log('[EchoBreaker] Container selector:', containerSelector);
-    console.log('[EchoBreaker] Found ytd-compact-video-renderer:', document.querySelectorAll('ytd-compact-video-renderer').length);
-    console.log('[EchoBreaker] Found ytd-watch-next-secondary-results-renderer:', document.querySelectorAll('ytd-watch-next-secondary-results-renderer').length);
-    console.log('[EchoBreaker] Found sidebar recommendations:', videoEls.length);
+    await log('info', `사이드바 분석`, {
+      selector: containerSelector,
+      found: videoEls.length
+    });
+    
+    // If no elements found, try AI extraction
+    if (videoEls.length === 0) {
+      await log('warning', `사이드바 셀렉터 실패 - AI 추출 시작`);
+      const aiVideos = await extractVideosWithAI('watch');
+      if (aiVideos.length > 0) {
+        await log('success', `AI 사이드바 추출 성공`, { count: aiVideos.length });
+        return aiVideos.map(v => ({
+          videoId: v.videoId,
+          title: v.title,
+          channelName: v.channelName,
+          thumbnailUrl: v.thumbnail,
+          source: 'sidebar_recommendation',
+          sourcePhase: 'recommended',
+          significanceWeight: 35,
+          collectedAt: new Date().toISOString()
+        }));
+      }
+    }
 
     for (let i = 0; i < Math.min(videoEls.length, 20); i++) {
       const el = videoEls[i];
