@@ -895,40 +895,27 @@
     return { videos, shorts };
   }
   
-  // Extract short data from a DOM element - YouTube 2024 DOM structure
+  // Extract short data from a DOM element - YouTube December 2024 DOM structure
   async function extractShortFromElement(el) {
     try {
       let videoId = null;
       let title = 'Short';
       let channelName = 'Unknown';
       
-      // Strategy 1: Try YouTube's internal data property
-      if (el.data) {
-        const data = el.data;
-        const reelRenderer = data.content?.reelItemRenderer ||
-                            data.richItemRenderer?.content?.reelItemRenderer ||
-                            data.reelItemRenderer;
-        
-        if (reelRenderer) {
-          videoId = reelRenderer.videoId;
-          title = reelRenderer.headline?.simpleText || 
-                  reelRenderer.headline?.runs?.[0]?.text || 'Short';
-          channelName = reelRenderer.navigationEndpoint?.browseEndpoint?.canonicalBaseUrl?.replace('/@', '') ||
-                       'Unknown';
-        }
+      // Find the yt-lockup-view-model container
+      const lockupModel = el.querySelector('.yt-lockup-view-model') || 
+                          el.querySelector('yt-lockup-view-model') ||
+                          el;
+      const lockupClasses = lockupModel.className || '';
+      
+      // === Extract Video ID ===
+      // Method 1: From content-id-{videoId} class
+      const contentIdMatch = lockupClasses.match(/content-id-([a-zA-Z0-9_-]+)/);
+      if (contentIdMatch) {
+        videoId = contentIdMatch[1];
       }
       
-      // Strategy 2: Try inner component's data
-      if (!videoId) {
-        const innerMedia = el.querySelector('ytd-rich-grid-slim-media, ytd-reel-item-renderer');
-        if (innerMedia?.data) {
-          const rr = innerMedia.data.reelItemRenderer || innerMedia.data;
-          videoId = rr.videoId;
-          title = rr.headline?.simpleText || rr.headline?.runs?.[0]?.text || 'Short';
-        }
-      }
-      
-      // Strategy 3: Parse from href (fallback)
+      // Method 2: From shorts link href
       if (!videoId) {
         const shortsLink = el.querySelector('a[href*="/shorts/"]');
         if (shortsLink) {
@@ -937,21 +924,47 @@
           if (match) {
             videoId = match[1];
           }
-          
-          // Try aria-label for title
-          const ariaLabel = shortsLink.getAttribute('aria-label');
+        }
+      }
+      
+      // === Extract Title ===
+      // Method 1: From h3 title attribute
+      const h3 = el.querySelector('h3[title]');
+      if (h3) {
+        title = h3.getAttribute('title') || 'Short';
+      }
+      
+      // Method 2: From yt-core-attributed-string span
+      if (title === 'Short') {
+        const titleSpan = el.querySelector('.yt-core-attributed-string');
+        if (titleSpan?.textContent?.trim()) {
+          title = titleSpan.textContent.trim();
+        }
+      }
+      
+      // Method 3: From link aria-label
+      if (title === 'Short') {
+        const titleLink = el.querySelector('a[aria-label]');
+        if (titleLink) {
+          const ariaLabel = titleLink.getAttribute('aria-label');
           if (ariaLabel && ariaLabel.length > 2) {
             title = ariaLabel;
           }
         }
       }
       
-      // Strategy 4: Get title from DOM
-      if (title === 'Short' && videoId) {
-        const titleEl = el.querySelector('#video-title, h3 yt-formatted-string, yt-formatted-string#video-title');
+      // Method 4: Old style
+      if (title === 'Short') {
+        const titleEl = el.querySelector('#video-title');
         if (titleEl?.textContent?.trim()) {
           title = titleEl.textContent.trim();
         }
+      }
+      
+      // === Extract Channel Name ===
+      const subtitleEl = el.querySelector('.yt-lockup-metadata-view-model__subtitle a');
+      if (subtitleEl?.textContent?.trim()) {
+        channelName = subtitleEl.textContent.trim();
       }
       
       if (!videoId) return null;
@@ -971,116 +984,123 @@
     }
   }
   
-  // Extract video data from a DOM element - YouTube 2024 DOM structure
+  // Extract video data from a DOM element - YouTube December 2024 DOM structure
+  // New structure: yt-lockup-view-model with content-id-{videoId} class
   async function extractVideoFromElement(el) {
     try {
       let videoId = null;
       let title = '';
       let channelName = 'Unknown';
       let isShort = false;
+      let extractMethod = '';
       
-      // Strategy 1: Try YouTube's internal data property (most reliable)
-      if (el.data) {
-        const data = el.data;
-        // Check for different data structures
-        const videoRenderer = data.content?.videoRenderer || 
-                             data.richItemRenderer?.content?.videoRenderer ||
-                             data.videoRenderer;
-        
-        if (videoRenderer) {
-          videoId = videoRenderer.videoId;
-          title = videoRenderer.title?.runs?.[0]?.text || 
-                  videoRenderer.title?.simpleText || '';
-          channelName = videoRenderer.ownerText?.runs?.[0]?.text ||
-                       videoRenderer.shortBylineText?.runs?.[0]?.text || 'Unknown';
-        }
-        
-        // Check for shorts
-        const reelRenderer = data.content?.reelItemRenderer ||
-                            data.richItemRenderer?.content?.reelItemRenderer ||
-                            data.reelItemRenderer;
-        if (reelRenderer) {
-          isShort = true;
-          videoId = reelRenderer.videoId;
-          title = reelRenderer.headline?.simpleText || 'Short';
-        }
+      // Find the yt-lockup-view-model container (new December 2024 layout)
+      const lockupModel = el.querySelector('.yt-lockup-view-model') || 
+                          el.querySelector('yt-lockup-view-model') ||
+                          el;
+      
+      // === Check if this is a Short ===
+      // Method 1: Check for shorts-specific class
+      const lockupClasses = lockupModel.className || '';
+      if (lockupClasses.includes('yt-lockup-view-model--shorts')) {
+        isShort = true;
+      }
+      // Method 2: Check data attribute
+      if (lockupModel.getAttribute('data-lockup-view-model-type') === 'ShortsVideo') {
+        isShort = true;
+      }
+      // Method 3: Check for shorts link
+      const shortsLink = el.querySelector('a[href*="/shorts/"]');
+      if (shortsLink) {
+        isShort = true;
       }
       
-      // Strategy 2: Try inner component's data property
-      if (!videoId) {
-        const innerMedia = el.querySelector('ytd-rich-grid-media, ytd-video-renderer');
-        if (innerMedia?.data) {
-          const vr = innerMedia.data.videoRenderer || innerMedia.data;
-          videoId = vr.videoId;
-          title = vr.title?.runs?.[0]?.text || vr.title?.simpleText || '';
-          channelName = vr.ownerText?.runs?.[0]?.text || 
-                       vr.shortBylineText?.runs?.[0]?.text || 'Unknown';
-        }
+      // === Extract Video ID ===
+      // Method 1: From content-id-{videoId} class (most reliable for new layout)
+      const contentIdMatch = lockupClasses.match(/content-id-([a-zA-Z0-9_-]+)/);
+      if (contentIdMatch) {
+        videoId = contentIdMatch[1];
+        extractMethod = 'class';
       }
       
-      // Strategy 3: Parse from href and aria-label (fallback)
+      // Method 2: From watch link href
       if (!videoId) {
-        // Get video ID from any watch link
         const watchLink = el.querySelector('a[href*="/watch?v="]');
         if (watchLink) {
           const href = watchLink.getAttribute('href');
           videoId = extractVideoId(href);
+          if (videoId) extractMethod = 'href';
         }
-        
-        // Check for shorts link
-        const shortsLink = el.querySelector('a[href*="/shorts/"]');
-        if (shortsLink) {
-          const href = shortsLink.getAttribute('href');
-          const match = href.match(/\/shorts\/([a-zA-Z0-9_-]+)/);
-          if (match) {
-            videoId = match[1];
-            isShort = true;
+      }
+      
+      // Method 3: From shorts link href
+      if (!videoId && shortsLink) {
+        const href = shortsLink.getAttribute('href');
+        const match = href.match(/\/shorts\/([a-zA-Z0-9_-]+)/);
+        if (match) {
+          videoId = match[1];
+          extractMethod = 'shorts-href';
+        }
+      }
+      
+      // === Extract Title ===
+      // Method 1: From h3 title attribute (most reliable)
+      const h3 = el.querySelector('h3[title]');
+      if (h3) {
+        title = h3.getAttribute('title') || '';
+      }
+      
+      // Method 2: From yt-core-attributed-string span
+      if (!title) {
+        const titleSpan = el.querySelector('.yt-core-attributed-string');
+        if (titleSpan?.textContent?.trim()) {
+          title = titleSpan.textContent.trim();
+        }
+      }
+      
+      // Method 3: From link aria-label
+      if (!title) {
+        const titleLink = el.querySelector('a.yt-lockup-metadata-view-model_title, a[aria-label]');
+        if (titleLink) {
+          const ariaLabel = titleLink.getAttribute('aria-label');
+          if (ariaLabel) {
+            // aria-label format: "제목 X분 Y초" - extract title before duration
+            const durationMatch = ariaLabel.match(/(.+?)\s+\d+분|\d+초|(\d+:\d+)/);
+            title = durationMatch ? durationMatch[1].trim() : ariaLabel;
           }
         }
       }
       
-      // Strategy 4: Get title from aria-label or DOM
-      if (!title && videoId) {
-        // Try aria-label on thumbnail
-        const thumbnail = el.querySelector('a#thumbnail, ytd-thumbnail a');
-        if (thumbnail) {
-          const ariaLabel = thumbnail.getAttribute('aria-label');
-          if (ariaLabel && ariaLabel.length > 5) {
-            // aria-label format: "Title by Channel X views Y time ago Duration"
-            const parts = ariaLabel.split(' by ');
-            if (parts.length >= 2) {
-              title = parts[0].trim();
-              // Try to extract channel from aria-label
-              const channelPart = parts[1].split(/\d+[,.]?\d*\s*(조회|views|view)/i)[0];
-              if (channelPart && channelPart.trim()) {
-                channelName = channelPart.trim();
-              }
-            } else {
-              title = ariaLabel;
-            }
-          }
+      // Method 4: Old style #video-title
+      if (!title) {
+        const videoTitle = el.querySelector('#video-title');
+        if (videoTitle?.textContent?.trim()) {
+          title = videoTitle.textContent.trim();
         }
-        
-        // Also try #video-title text
-        const titleEl = el.querySelector('#video-title');
-        if (titleEl?.textContent?.trim()) {
-          title = titleEl.textContent.trim();
-        }
-        
-        // Try channel name from DOM
+      }
+      
+      // === Extract Channel Name ===
+      // Method 1: New layout subtitle
+      const subtitleEl = el.querySelector('.yt-lockup-metadata-view-model__subtitle a');
+      if (subtitleEl?.textContent?.trim()) {
+        channelName = subtitleEl.textContent.trim();
+      }
+      
+      // Method 2: Old layout channel name
+      if (channelName === 'Unknown') {
         const channelEl = el.querySelector('#channel-name a, ytd-channel-name a, ytd-channel-name #text');
         if (channelEl?.textContent?.trim()) {
           channelName = channelEl.textContent.trim();
         }
       }
       
-      // Debug logging
+      // Debug logging (first 5 elements)
       if (!window._ebDebugCount) window._ebDebugCount = 0;
       if (window._ebDebugCount < 5) {
         await log('info', `추출 #${window._ebDebugCount + 1}`, {
-          hasData: !!el.data,
-          videoId: videoId?.substring(0, 8),
-          title: title?.substring(0, 20),
+          method: extractMethod,
+          videoId: videoId?.substring(0, 11),
+          title: title?.substring(0, 25),
           channel: channelName?.substring(0, 15),
           isShort
         });
@@ -1090,11 +1110,11 @@
       // Must have video ID
       if (!videoId) return null;
       
-      // Skip shorts here (they're handled separately)
+      // Skip shorts here (they're handled separately by extractShortFromElement)
       if (isShort) return null;
       
-      // Must have title
-      if (!title) return null;
+      // Must have title (but be lenient)
+      if (!title) title = 'Untitled';
 
       return {
         videoId,
