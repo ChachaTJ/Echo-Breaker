@@ -889,59 +889,144 @@
   // Extract video data from a DOM element
   async function extractVideoFromElement(el) {
     try {
-      const titleEl = findElement('#video-title, a#video-title-link, #video-title-link yt-formatted-string, h3 a#video-title', el);
-      const channelEl = findElement('#channel-name a, ytd-channel-name a, #text-container a, #text a', el);
-      const linkEl = findElement('a#thumbnail, a.ytd-thumbnail, ytd-thumbnail a, a[href*="/watch"]', el);
+      // Try multiple selector strategies for title
+      const titleSelectors = [
+        '#video-title',
+        'a#video-title-link',
+        '#video-title-link yt-formatted-string',
+        'h3 a#video-title',
+        'yt-formatted-string#video-title',
+        '#details #video-title',
+        'ytd-rich-grid-media #video-title',
+        '[id="video-title"]',
+        'a[id="video-title"]',
+        '#dismissible #video-title'
+      ];
       
-      // Extract additional metadata
-      const viewCountEl = findElement('#metadata-line span:first-child, .inline-metadata-item:first-child, #metadata-line span', el);
-      const uploadTimeEl = findElement('#metadata-line span:last-child, .inline-metadata-item:last-child', el);
-      const durationEl = findElement('ytd-thumbnail-overlay-time-status-renderer span, #overlays span.ytd-thumbnail-overlay-time-status-renderer, span.ytd-thumbnail-overlay-time-status-renderer', el);
+      let titleEl = null;
+      let titleText = '';
+      for (const sel of titleSelectors) {
+        const found = el.querySelector(sel);
+        if (found && found.textContent?.trim()) {
+          titleEl = found;
+          titleText = found.textContent.trim();
+          break;
+        }
+      }
       
-      // Get channel avatar
-      const avatarEl = findElement('#avatar-link img, yt-img-shadow img, #avatar img', el);
-
+      // Try to get title from aria-label as fallback
+      if (!titleText) {
+        const ariaEl = el.querySelector('[aria-label]');
+        if (ariaEl) {
+          const ariaLabel = ariaEl.getAttribute('aria-label');
+          if (ariaLabel && ariaLabel.length > 5) {
+            titleText = ariaLabel.split(' by ')[0] || ariaLabel;
+          }
+        }
+      }
+      
+      // Try multiple selector strategies for link
+      const linkSelectors = [
+        'a#thumbnail',
+        'a.ytd-thumbnail',
+        'ytd-thumbnail a',
+        'a[href*="/watch"]',
+        '#thumbnail',
+        '#dismissible a[href*="/watch"]'
+      ];
+      
+      let linkEl = null;
+      let href = '';
+      for (const sel of linkSelectors) {
+        const found = el.querySelector(sel);
+        const foundHref = found?.getAttribute('href');
+        if (foundHref && foundHref.includes('/watch')) {
+          linkEl = found;
+          href = foundHref;
+          break;
+        }
+      }
+      
+      // Also check title element for href
+      if (!href && titleEl) {
+        const titleHref = titleEl.getAttribute('href') || titleEl.closest('a')?.getAttribute('href');
+        if (titleHref && titleHref.includes('/watch')) {
+          href = titleHref;
+        }
+      }
+      
+      // Try multiple selector strategies for channel
+      const channelSelectors = [
+        '#channel-name a',
+        'ytd-channel-name a',
+        '#text-container a',
+        '#text a',
+        'ytd-channel-name #text',
+        '#channel-name #text',
+        '#channel-name yt-formatted-string',
+        '.ytd-channel-name'
+      ];
+      
+      let channelName = 'Unknown';
+      for (const sel of channelSelectors) {
+        const found = el.querySelector(sel);
+        if (found && found.textContent?.trim()) {
+          channelName = found.textContent.trim();
+          break;
+        }
+      }
+      
       // Debug logging for first few elements
       if (!window._ebDebugCount) window._ebDebugCount = 0;
-      if (window._ebDebugCount < 3) {
-        console.log('[EchoBreaker] Element extraction debug:', {
-          tagName: el.tagName,
-          hasTitle: !!titleEl,
-          titleText: titleEl?.textContent?.substring(0, 30),
-          hasChannel: !!channelEl,
-          hasLink: !!linkEl,
-          linkHref: linkEl?.getAttribute('href')?.substring(0, 50),
-          innerHTML: el.innerHTML?.substring(0, 200)
+      if (window._ebDebugCount < 5) {
+        await log('info', `요소 추출 디버그 #${window._ebDebugCount + 1}`, {
+          tag: el.tagName,
+          hasTitle: !!titleText,
+          title: titleText?.substring(0, 25),
+          hasHref: !!href,
+          href: href?.substring(0, 40),
+          channel: channelName?.substring(0, 20)
         });
         window._ebDebugCount++;
       }
 
-      if (!titleEl) return null;
-
-      const href = linkEl?.getAttribute('href') || titleEl?.getAttribute('href') || '';
+      // Skip if no title found
+      if (!titleText) {
+        return null;
+      }
       
-      // Skip if this is a shorts link (safety check)
+      // Skip if this is a shorts link
       if (href.includes('/shorts/')) return null;
       
       const videoId = extractVideoId(href);
-      if (!videoId) return null;
-
-      // Parse view count
-      const viewCountText = viewCountEl?.textContent?.trim() || '';
-      const viewCount = parseViewCount(viewCountText);
+      if (!videoId) {
+        // Try to extract from any anchor in the element
+        const anyAnchor = el.querySelector('a[href*="/watch?v="]');
+        if (anyAnchor) {
+          const anyHref = anyAnchor.getAttribute('href');
+          const anyVideoId = extractVideoId(anyHref);
+          if (anyVideoId) {
+            return {
+              videoId: anyVideoId,
+              title: titleText,
+              channelName,
+              thumbnailUrl: `https://img.youtube.com/vi/${anyVideoId}/mqdefault.jpg`,
+              source: 'home_feed',
+              sourcePhase: 'home_feed',
+              collectedAt: new Date().toISOString()
+            };
+          }
+        }
+        return null;
+      }
 
       return {
         videoId,
-        title: titleEl.textContent?.trim() || '',
-        channelName: channelEl?.textContent?.trim() || 'Unknown',
-        channelId: extractChannelId(channelEl?.href),
-        channelAvatar: avatarEl?.src || null,
+        title: titleText,
+        channelName,
         thumbnailUrl: `https://img.youtube.com/vi/${videoId}/mqdefault.jpg`,
-        viewCount: viewCount,
-        viewCountText: viewCountText,
-        uploadTime: uploadTimeEl?.textContent?.trim() || null,
-        duration: durationEl?.textContent?.trim() || null,
         source: 'home_feed',
+        sourcePhase: 'home_feed',
         collectedAt: new Date().toISOString()
       };
     } catch (e) {
@@ -1708,7 +1793,6 @@
         <img class="echobreaker-video-thumbnail" 
              src="${thumbnailUrl}" 
              alt="${rec.title}">
-        <div class="echobreaker-safe-badge-overlay">Safe</div>
       </div>
       <div class="echobreaker-video-info">
         <div class="echobreaker-video-title">${rec.title}</div>
@@ -1717,10 +1801,10 @@
       </div>
     `;
     
-    // Open in youtube-nocookie to not affect algorithm
+    // Open video normally
     card.addEventListener('click', (e) => {
       e.preventDefault();
-      window.open(rec.noCookieUrl || `https://www.youtube-nocookie.com/embed/${rec.videoId}`, '_blank');
+      window.open(`https://www.youtube.com/watch?v=${rec.videoId}`, '_blank');
     });
     
     return card;

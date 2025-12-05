@@ -82,19 +82,6 @@ chrome.runtime.onInstalled.addListener(async () => {
   await chrome.storage.local.set(settings);
   
   // Create context menu for incognito viewing
-  chrome.contextMenus.create({
-    id: 'echobreaker-open-safe',
-    title: 'EchoBreaker: Open without affecting algorithm',
-    contexts: ['link'],
-    documentUrlPatterns: ['*://www.youtube.com/*', '*://youtube.com/*']
-  });
-  
-  chrome.contextMenus.create({
-    id: 'echobreaker-open-safe-video',
-    title: 'EchoBreaker: Open video without affecting algorithm',
-    contexts: ['video'],
-    documentUrlPatterns: ['*://www.youtube.com/*', '*://youtube.com/*']
-  });
   
   // Start ping interval
   startPingInterval();
@@ -349,64 +336,6 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   }
 });
 
-// Context menu handler for opening videos without affecting algorithm
-chrome.contextMenus.onClicked.addListener(async (info, tab) => {
-  if (info.menuItemId === 'echobreaker-open-safe' || info.menuItemId === 'echobreaker-open-safe-video') {
-    let url = info.linkUrl || info.srcUrl || info.pageUrl;
-    
-    if (!url) {
-      console.log('[EchoBreaker] No URL found for context menu action');
-      return;
-    }
-    
-    // Extract video ID from various YouTube URL formats
-    let videoId = null;
-    
-    // Handle youtu.be short links
-    if (url.includes('youtu.be/')) {
-      videoId = url.split('youtu.be/')[1]?.split('?')[0]?.split('/')[0];
-    }
-    // Handle youtube.com/watch?v=
-    else if (url.includes('/watch')) {
-      try {
-        const urlObj = new URL(url);
-        videoId = urlObj.searchParams.get('v');
-      } catch (e) {
-        // Invalid URL
-      }
-    }
-    // Handle youtube.com/shorts/
-    else if (url.includes('/shorts/')) {
-      videoId = url.split('/shorts/')[1]?.split('?')[0]?.split('/')[0];
-    }
-    // Handle youtube.com/embed/
-    else if (url.includes('/embed/')) {
-      videoId = url.split('/embed/')[1]?.split('?')[0]?.split('/')[0];
-    }
-    
-    // Only proceed if we found a valid video ID
-    if (!videoId || videoId.length < 5) {
-      console.log('[EchoBreaker] Invalid or missing video ID from URL:', url);
-      return;
-    }
-    
-    // Build clean watch URL
-    const watchUrl = `https://www.youtube.com/watch?v=${videoId}`;
-    
-    // Use youtube-nocookie.com - doesn't save to watch history or affect algorithm
-    const noCookieUrl = `https://www.youtube-nocookie.com/embed/${videoId}?autoplay=1&rel=0`;
-    
-    await chrome.windows.create({
-      url: noCookieUrl,
-      focused: true,
-      width: 1280,
-      height: 720,
-      type: 'popup'
-    });
-    
-    console.log('[EchoBreaker] Opened in algorithm-safe mode:', noCookieUrl);
-  }
-});
 
 // Handle messages for getting video stance info and diverse recommendations
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
