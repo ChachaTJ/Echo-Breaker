@@ -6,7 +6,7 @@ const EXTENSION_VERSION = chrome.runtime.getManifest().version;
 
 // Default settings - Update this URL to your Replit app URL
 const DEFAULT_SETTINGS = {
-  apiUrl: 'https://046806e2-7cc7-45a7-8712-1a53ec91f00f-00-1k55bkxju0p0w.picard.replit.dev',
+  apiUrl: 'https://echo-breaker--chayoonmin.replit.app',
   autoSync: true,
   syncInterval: 15,
   lastSync: null,

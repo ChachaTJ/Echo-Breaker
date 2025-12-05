@@ -7,7 +7,7 @@
   // Configuration
   const CONFIG = {
     SYNC_INTERVAL: 15 * 60 * 1000,
-    API_BASE_URL: 'https://046806e2-7cc7-45a7-8712-1a53ec91f00f-00-1k55bkxju0p0w.picard.replit.dev',
+    API_BASE_URL: 'https://echo-breaker--chayoonmin.replit.app',
     MAX_VIDEOS: 50,
     SELECTOR_CACHE_KEY: 'echobreaker_selectors',
   };
