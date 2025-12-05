@@ -123,6 +123,12 @@ EchoBreaker is a web application + Chrome extension system designed to help user
 - Chrome extension with auto-crawling of YouTube data
 - OpenAI integration for AI-powered bias analysis with graceful fallbacks
 - Theme system with dark/light mode toggle
+- **NEW: Feature Toggles in Extension Popup**
+  - AI Recommendation Cards: Enable/disable diverse video suggestions on YouTube
+  - Stance Overlays: Enable/disable political stance badges on videos
+  - Collect Shorts: Enable/disable YouTube Shorts data collection
+  - Settings stored in chrome.storage.local with real-time updates
+  - Instant enable/disable without page refresh (storage change listener)
 - **NEW: Gemini AI Video Stance Analysis**
   - Batch video analysis using Gemini 2.5 Flash via Replit AI Integrations
   - Political stance detection: progressive, conservative, centrist, non-political
