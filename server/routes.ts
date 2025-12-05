@@ -11,6 +11,8 @@ import {
 } from "@shared/schema";
 import OpenAI from "openai";
 import { GoogleGenAI } from "@google/genai";
+import { PCA } from "ml-pca";
+import { kmeans } from "ml-kmeans";
 
 // App version
 const APP_VERSION = "1.0.0";
@@ -413,9 +415,9 @@ Your response (selector only):`;
         // Fallback: Generate basic analysis without AI
         console.log("OpenAI not available, using fallback analysis");
         
-        const channelNames = [...new Set(videos.map(v => v.channelName))];
+        const channelNames = Array.from(new Set(videos.map(v => v.channelName)));
         const categories = videos.map(v => v.category).filter(Boolean);
-        const uniqueCategories = [...new Set(categories)];
+        const uniqueCategories = Array.from(new Set(categories));
         
         const categoriesWithColors: CategoryDistribution[] = uniqueCategories.length > 0 
           ? uniqueCategories.map((cat, i) => ({
@@ -445,7 +447,7 @@ Your response (selector only):`;
 
       // Prepare video data for analysis
       const videoTitles = videos.slice(0, 50).map(v => `${v.title} - ${v.channelName}`);
-      const channelNames = [...new Set(videos.map(v => v.channelName))];
+      const channelNames = Array.from(new Set(videos.map(v => v.channelName)));
       const categories = videos.map(v => v.category).filter(Boolean);
 
       const prompt = `Analyze the following YouTube viewing history and provide a bias analysis. 
@@ -457,7 +459,7 @@ Channels frequently watched:
 ${channelNames.slice(0, 20).join(', ')}
 
 Categories found:
-${[...new Set(categories)].join(', ')}
+${Array.from(new Set(categories)).join(', ')}
 
 Please analyze this data and provide:
 1. A bias score from 0-100 (0 = heavily left-leaning, 50 = balanced, 100 = heavily right-leaning)
@@ -513,6 +515,159 @@ Respond in JSON format:
     }
   });
 
+  // 3D Constellation visualization endpoint
+  app.get("/api/analysis/constellation", async (req, res) => {
+    try {
+      const videos = await storage.getVideos();
+      
+      if (videos.length < 3) {
+        return res.status(400).json({ 
+          error: "Need at least 3 videos for visualization",
+          videos: [],
+          clusters: []
+        });
+      }
+
+      // Create text embeddings using TF-IDF style approach
+      // Build vocabulary from all video titles and channel names
+      const documents = videos.map(v => 
+        `${v.title} ${v.channelName} ${v.category || ''}`.toLowerCase()
+      );
+      
+      // Simple word tokenization
+      const allWords: string[] = [];
+      const wordCounts: Map<string, number>[] = [];
+      
+      documents.forEach(doc => {
+        const words = doc.split(/\s+/).filter(w => w.length > 2);
+        const counts = new Map<string, number>();
+        words.forEach(word => {
+          counts.set(word, (counts.get(word) || 0) + 1);
+          if (!allWords.includes(word)) allWords.push(word);
+        });
+        wordCounts.push(counts);
+      });
+
+      // Limit vocabulary size for efficiency
+      const vocabulary = allWords.slice(0, 100);
+      
+      // Create TF-IDF vectors
+      const embeddings: number[][] = wordCounts.map(counts => {
+        return vocabulary.map(word => {
+          const tf = counts.get(word) || 0;
+          const df = wordCounts.filter(c => c.has(word)).length;
+          const idf = Math.log((documents.length + 1) / (df + 1));
+          return tf * idf;
+        });
+      });
+
+      // Handle case where vocabulary is too small
+      if (vocabulary.length < 3) {
+        // Fallback: use random positions based on channel name hash
+        const fallbackVideos = videos.map((video, i) => {
+          const hash = video.channelName.split('').reduce((a, b) => {
+            a = ((a << 5) - a) + b.charCodeAt(0);
+            return a & a;
+          }, 0);
+          
+          return {
+            id: video.id.toString(),
+            videoId: video.videoId,
+            title: video.title,
+            channelName: video.channelName,
+            thumbnailUrl: video.thumbnailUrl || `https://img.youtube.com/vi/${video.videoId}/mqdefault.jpg`,
+            position: [
+              (hash % 100) / 5 - 10,
+              ((hash >> 8) % 100) / 5 - 10,
+              ((hash >> 16) % 100) / 5 - 10
+            ] as [number, number, number],
+            cluster: i % 5,
+            clusterName: video.category || 'Unknown'
+          };
+        });
+
+        return res.json({
+          videos: fallbackVideos,
+          clusters: [
+            { id: 0, name: 'Group A', color: '#FF6B6B' },
+            { id: 1, name: 'Group B', color: '#4ECDC4' },
+            { id: 2, name: 'Group C', color: '#45B7D1' },
+            { id: 3, name: 'Group D', color: '#96CEB4' },
+            { id: 4, name: 'Group E', color: '#FFEAA7' },
+          ]
+        });
+      }
+
+      // Apply PCA to reduce to 3D
+      const pca = new PCA(embeddings);
+      const projected = pca.predict(embeddings, { nComponents: 3 });
+      const positions = projected.to2DArray();
+
+      // Scale positions for better visualization
+      const scale = 20;
+      const scaledPositions = positions.map(pos => 
+        pos.map(v => v * scale) as [number, number, number]
+      );
+
+      // Determine optimal cluster count (between 3 and min(8, sqrt(n)))
+      const maxClusters = Math.min(8, Math.floor(Math.sqrt(videos.length)));
+      const numClusters = Math.max(3, maxClusters);
+
+      // Apply k-means clustering
+      const clusterResult = kmeans(embeddings, numClusters, {
+        initialization: 'kmeans++',
+        maxIterations: 100
+      });
+
+      // Generate cluster names based on most common words in each cluster
+      const clusterNames: string[] = [];
+      for (let c = 0; c < numClusters; c++) {
+        const clusterDocs = documents.filter((_, i) => clusterResult.clusters[i] === c);
+        const wordFreq = new Map<string, number>();
+        
+        clusterDocs.forEach(doc => {
+          doc.split(/\s+/).filter(w => w.length > 3).forEach(word => {
+            wordFreq.set(word, (wordFreq.get(word) || 0) + 1);
+          });
+        });
+        
+        const topWord = Array.from(wordFreq.entries())
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 1)
+          .map(([word]) => word.charAt(0).toUpperCase() + word.slice(1))[0] || `Group ${c + 1}`;
+        
+        clusterNames.push(topWord);
+      }
+
+      // Build response with video nodes
+      const videoNodes = videos.map((video, i) => ({
+        id: video.id.toString(),
+        videoId: video.videoId,
+        title: video.title,
+        channelName: video.channelName,
+        thumbnailUrl: video.thumbnailUrl || `https://img.youtube.com/vi/${video.videoId}/mqdefault.jpg`,
+        position: scaledPositions[i] || [0, 0, 0],
+        cluster: clusterResult.clusters[i],
+        clusterName: clusterNames[clusterResult.clusters[i]] || 'Unknown'
+      }));
+
+      const clusters = clusterNames.map((name, i) => ({
+        id: i,
+        name,
+        color: [
+          '#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7',
+          '#DDA0DD', '#98D8C8', '#F7DC6F', '#BB8FCE', '#85C1E9'
+        ][i % 10]
+      }));
+
+      res.json({ videos: videoNodes, clusters });
+
+    } catch (error) {
+      console.error("Constellation generation error:", error);
+      res.status(500).json({ error: "Failed to generate constellation" });
+    }
+  });
+
   // Recommendations endpoints
   app.get("/api/recommendations", async (req, res) => {
     try {
@@ -540,7 +695,7 @@ Respond in JSON format:
         // Fallback: Generate recommendations based on actual video data
         console.log("OpenAI not available, using fallback recommendations based on collected data");
         
-        const channelNames = [...new Set(videos.map(v => v.channelName))];
+        const channelNames = Array.from(new Set(videos.map(v => v.channelName)));
         const topTopics = analysis.topTopics || channelNames.slice(0, 5);
         
         // Generate 6 balanced recommendations based on analysis
@@ -612,7 +767,7 @@ Respond in JSON format:
         return res.json(created);
       }
 
-      const watchedChannels = [...new Set(videos.map(v => v.channelName))];
+      const watchedChannels = Array.from(new Set(videos.map(v => v.channelName)));
       const topTopics = analysis.topTopics || [];
 
       const prompt = `Based on this YouTube viewing pattern analysis, suggest 6 diverse videos that would help break the echo chamber.

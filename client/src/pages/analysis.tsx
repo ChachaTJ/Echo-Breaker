@@ -1,5 +1,5 @@
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { BarChart3, RefreshCw, AlertTriangle, TrendingUp } from "lucide-react";
+import { BarChart3, RefreshCw, AlertTriangle, TrendingUp, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -7,10 +7,29 @@ import { Badge } from "@/components/ui/badge";
 import { BiasMeter } from "@/components/bias-meter";
 import { CategoryChart } from "@/components/category-chart";
 import { BiasVisualization } from "@/components/bias-visualization";
+import { VideoConstellation } from "@/components/video-constellation";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import type { AnalysisResult, Video, CategoryDistribution } from "@shared/schema";
+
+interface ConstellationData {
+  videos: Array<{
+    id: string;
+    videoId: string;
+    title: string;
+    channelName: string;
+    thumbnailUrl: string;
+    position: [number, number, number];
+    cluster: number;
+    clusterName: string;
+  }>;
+  clusters: Array<{
+    id: number;
+    name: string;
+    color: string;
+  }>;
+}
 
 function TopicBadge({ topic, index }: { topic: string; index: number }) {
   const colors = [
@@ -36,6 +55,11 @@ export default function Analysis() {
 
   const { data: videos } = useQuery<Video[]>({
     queryKey: ['/api/videos'],
+  });
+
+  const { data: constellationData, isLoading: constellationLoading } = useQuery<ConstellationData>({
+    queryKey: ['/api/analysis/constellation'],
+    enabled: (videos?.length || 0) >= 3,
   });
 
   const runAnalysisMutation = useMutation({
@@ -188,6 +212,37 @@ export default function Analysis() {
           </div>
 
           <BiasVisualization videos={videos || []} analysis={analysis} />
+
+          {/* 3D Video Constellation */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Sparkles className="h-5 w-5" />
+                Video Constellation
+              </CardTitle>
+              <CardDescription>
+                3D visualization of your video collection - similar videos cluster together
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {constellationLoading ? (
+                <Skeleton className="h-[500px] w-full rounded-lg" />
+              ) : constellationData && constellationData.videos.length > 0 ? (
+                <div className="h-[500px] w-full">
+                  <VideoConstellation
+                    videos={constellationData.videos}
+                    clusters={constellationData.clusters}
+                  />
+                </div>
+              ) : (
+                <div className="flex flex-col items-center justify-center h-[300px] text-center text-muted-foreground">
+                  <Sparkles className="h-12 w-12 mb-4 opacity-50" />
+                  <p>Collect more videos to see the constellation</p>
+                  <p className="text-sm mt-1">At least 3 videos are needed</p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
 
           {analysis.biasScore < 35 || analysis.biasScore > 65 ? (
             <Card className="border-orange-500/50 bg-orange-500/5">
