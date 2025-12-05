@@ -1,6 +1,9 @@
 // EchoBreaker Background Service Worker
 // Handles background tasks and messaging
 
+// Extension version from manifest
+const EXTENSION_VERSION = chrome.runtime.getManifest().version;
+
 // Default settings - Update this URL to your Replit app URL
 const DEFAULT_SETTINGS = {
   apiUrl: 'https://046806e2-7cc7-45a7-8712-1a53ec91f00f-00-1k55bkxju0p0w.picard.replit.dev',
@@ -12,13 +15,58 @@ const DEFAULT_SETTINGS = {
 
 // Initialize on install
 chrome.runtime.onInstalled.addListener(async () => {
-  console.log('[EchoBreaker] Extension installed');
+  console.log('[EchoBreaker] Extension installed, version:', EXTENSION_VERSION);
   
   // Set default settings
   const stored = await chrome.storage.local.get(Object.keys(DEFAULT_SETTINGS));
   const settings = { ...DEFAULT_SETTINGS, ...stored };
   await chrome.storage.local.set(settings);
+  
+  // Start ping interval
+  startPingInterval();
 });
+
+// Start up - send initial ping
+chrome.runtime.onStartup.addListener(() => {
+  console.log('[EchoBreaker] Extension started');
+  startPingInterval();
+});
+
+// Ping server to indicate extension is connected
+let pingIntervalId = null;
+
+async function pingServer() {
+  try {
+    const stored = await chrome.storage.local.get(['apiUrl']);
+    const apiUrl = stored.apiUrl || DEFAULT_SETTINGS.apiUrl;
+    
+    const response = await fetch(`${apiUrl}/api/extension/ping`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ version: EXTENSION_VERSION })
+    });
+    
+    if (response.ok) {
+      const data = await response.json();
+      console.log('[EchoBreaker] Ping successful, server version:', data.appVersion);
+    }
+  } catch (error) {
+    console.log('[EchoBreaker] Ping failed:', error.message);
+  }
+}
+
+function startPingInterval() {
+  // Clear any existing interval
+  if (pingIntervalId) {
+    clearInterval(pingIntervalId);
+  }
+  
+  // Send initial ping
+  pingServer();
+  
+  // Ping every 2 minutes
+  pingIntervalId = setInterval(pingServer, 2 * 60 * 1000);
+}
 
 // Handle messages from content script and popup
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {

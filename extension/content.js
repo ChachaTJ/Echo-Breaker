@@ -566,11 +566,15 @@
   async function sendToServer(data) {
     console.log('[EchoBreaker] Sending data to server:', CONFIG.API_BASE_URL);
     
+    // Get extension version
+    const manifest = chrome.runtime.getManifest();
+    const extensionVersion = manifest.version;
+    
     try {
       const response = await fetch(`${CONFIG.API_BASE_URL}/api/crawl`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data)
+        body: JSON.stringify({ ...data, extensionVersion })
       });
 
       if (!response.ok) {
