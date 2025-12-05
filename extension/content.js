@@ -817,10 +817,318 @@
     }
   }
 
+  // ========================================
+  // VISUAL OVERLAY SYSTEM
+  // Echo chamber dimming + Diversity badges
+  // ========================================
+
+  // Inject CSS styles for overlays
+  function injectOverlayStyles() {
+    if (document.getElementById('echobreaker-overlay-styles')) return;
+    
+    const style = document.createElement('style');
+    style.id = 'echobreaker-overlay-styles';
+    style.textContent = `
+      /* Echo chamber dimming */
+      .echobreaker-echo-chamber {
+        opacity: 0.4 !important;
+        transition: opacity 0.3s ease !important;
+      }
+      .echobreaker-echo-chamber:hover {
+        opacity: 0.9 !important;
+      }
+      
+      /* Diversity highlight - green border */
+      .echobreaker-diverse {
+        outline: 3px solid #22c55e !important;
+        outline-offset: 2px !important;
+      }
+      
+      /* Stance badges */
+      .echobreaker-badge {
+        position: absolute !important;
+        top: 4px !important;
+        right: 4px !important;
+        padding: 2px 6px !important;
+        border-radius: 4px !important;
+        font-size: 10px !important;
+        font-weight: bold !important;
+        color: white !important;
+        z-index: 1000 !important;
+        pointer-events: none !important;
+        text-shadow: 0 1px 2px rgba(0,0,0,0.5) !important;
+      }
+      .echobreaker-badge-progressive {
+        background: linear-gradient(135deg, #3b82f6, #1d4ed8) !important;
+      }
+      .echobreaker-badge-conservative {
+        background: linear-gradient(135deg, #ef4444, #b91c1c) !important;
+      }
+      .echobreaker-badge-centrist {
+        background: linear-gradient(135deg, #a855f7, #7c3aed) !important;
+      }
+      .echobreaker-badge-non-political {
+        background: linear-gradient(135deg, #6b7280, #4b5563) !important;
+      }
+      
+      /* Echo warning icon */
+      .echobreaker-echo-warning {
+        position: absolute !important;
+        bottom: 4px !important;
+        right: 4px !important;
+        width: 24px !important;
+        height: 24px !important;
+        background: rgba(239, 68, 68, 0.9) !important;
+        border-radius: 50% !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        z-index: 1000 !important;
+        pointer-events: none !important;
+      }
+      .echobreaker-echo-warning::after {
+        content: "!" !important;
+        color: white !important;
+        font-weight: bold !important;
+        font-size: 14px !important;
+      }
+      
+      /* Diversity star */
+      .echobreaker-diverse-star {
+        position: absolute !important;
+        bottom: 4px !important;
+        left: 4px !important;
+        width: 24px !important;
+        height: 24px !important;
+        background: rgba(34, 197, 94, 0.9) !important;
+        border-radius: 50% !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        z-index: 1000 !important;
+        pointer-events: none !important;
+      }
+      .echobreaker-diverse-star::after {
+        content: "+" !important;
+        color: white !important;
+        font-weight: bold !important;
+        font-size: 16px !important;
+      }
+    `;
+    document.head.appendChild(style);
+  }
+
+  // Cache for video stances
+  let stanceCache = {};
+  let lastStanceCheck = 0;
+  const STANCE_CHECK_INTERVAL = 30000; // Check every 30 seconds
+
+  // Get video stances from server
+  async function getVideoStances(videoIds) {
+    try {
+      const response = await chrome.runtime.sendMessage({
+        type: 'GET_VIDEO_STANCES',
+        videoIds
+      });
+      return response || { stances: {} };
+    } catch (error) {
+      console.log('[EchoBreaker] Failed to get stances:', error.message);
+      return { stances: {} };
+    }
+  }
+
+  // Apply visual overlays to video thumbnails
+  async function applyVisualOverlays() {
+    // Only check periodically to avoid too many API calls
+    if (Date.now() - lastStanceCheck < STANCE_CHECK_INTERVAL) return;
+    lastStanceCheck = Date.now();
+    
+    injectOverlayStyles();
+    
+    // Find all video elements - use specific YouTube custom elements
+    const videoElements = document.querySelectorAll('ytd-compact-video-renderer, ytd-video-renderer, ytd-rich-item-renderer');
+    if (videoElements.length === 0) return;
+    
+    // Extract video IDs - deduplicate and map to root element only
+    const videoIdMap = new Map();
+    const processedIds = new Set();
+    
+    videoElements.forEach(el => {
+      // Skip if already processed to avoid duplicates
+      if (el.dataset.echobreakerProcessed === 'true') {
+        // Already processed this element, check if videoId already mapped
+        const existingId = el.dataset.echobreakerVideoId;
+        if (existingId) {
+          processedIds.add(existingId);
+        }
+        return;
+      }
+      
+      const link = el.querySelector('a#thumbnail, a[href*="/watch"], a[href*="/shorts/"]');
+      if (link) {
+        const href = link.getAttribute('href');
+        const videoId = extractVideoId(href);
+        if (videoId && !processedIds.has(videoId)) {
+          videoIdMap.set(videoId, el);
+          processedIds.add(videoId);
+          el.dataset.echobreakerVideoId = videoId;
+        }
+      }
+    });
+    
+    if (videoIdMap.size === 0) return;
+    
+    const videoIds = Array.from(videoIdMap.keys());
+    console.log('[EchoBreaker] Checking stances for', videoIds.length, 'videos');
+    
+    // Get stances from server
+    const response = await getVideoStances(videoIds);
+    const { stances, dominantStance, totalAnalyzed, totalPolitical } = response;
+    
+    // Only apply overlays if we have enough political content analyzed
+    if (!totalPolitical || totalPolitical < 5) {
+      console.log('[EchoBreaker] Not enough political videos analyzed yet:', totalPolitical || 0);
+      return;
+    }
+    
+    // Apply overlays
+    let echoCount = 0;
+    let diverseCount = 0;
+    
+    videoIds.forEach(videoId => {
+      const el = videoIdMap.get(videoId);
+      if (!el) return;
+      
+      const stanceInfo = stances[videoId];
+      
+      // Mark as processed
+      el.dataset.echobreakerProcessed = 'true';
+      
+      // First, clean up ALL existing overlays on this element
+      el.querySelectorAll('.echobreaker-badge, .echobreaker-echo-warning, .echobreaker-diverse-star').forEach(b => b.remove());
+      el.classList.remove('echobreaker-echo-chamber', 'echobreaker-diverse');
+      
+      // Skip if no stance info (unanalyzed video)
+      if (!stanceInfo) return;
+      
+      // Find the thumbnail container - be specific to avoid nested elements
+      const thumbnail = el.querySelector('ytd-thumbnail, a#thumbnail');
+      if (!thumbnail) return;
+      
+      // Ensure thumbnail container has position relative
+      const thumbnailStyle = getComputedStyle(thumbnail);
+      if (thumbnailStyle.position === 'static') {
+        thumbnail.style.position = 'relative';
+      }
+      
+      // Apply echo chamber dimming
+      if (stanceInfo.isEchoChamber) {
+        el.classList.add('echobreaker-echo-chamber');
+        
+        // Add warning icon (only if not already present)
+        if (!thumbnail.querySelector('.echobreaker-echo-warning')) {
+          const warning = document.createElement('div');
+          warning.className = 'echobreaker-echo-warning';
+          thumbnail.appendChild(warning);
+        }
+        echoCount++;
+      }
+      
+      // Apply diversity highlight
+      if (stanceInfo.isDiverse) {
+        el.classList.add('echobreaker-diverse');
+        
+        // Add star icon (only if not already present)
+        if (!thumbnail.querySelector('.echobreaker-diverse-star')) {
+          const star = document.createElement('div');
+          star.className = 'echobreaker-diverse-star';
+          thumbnail.appendChild(star);
+        }
+        diverseCount++;
+      }
+      
+      // Add stance badge if political content
+      if (stanceInfo.stance && stanceInfo.stance !== 'non-political') {
+        // Only add if not already present
+        if (!thumbnail.querySelector('.echobreaker-badge')) {
+          const badge = document.createElement('div');
+          badge.className = `echobreaker-badge echobreaker-badge-${stanceInfo.stance}`;
+          
+          const labels = {
+            'progressive': 'L',
+            'conservative': 'R',
+            'centrist': 'C'
+          };
+          badge.textContent = labels[stanceInfo.stance] || '';
+          
+          thumbnail.appendChild(badge);
+        }
+      }
+    });
+    
+    if (echoCount > 0 || diverseCount > 0) {
+      console.log(`[EchoBreaker] Applied overlays: ${echoCount} echo chamber, ${diverseCount} diverse (dominant: ${dominantStance})`);
+    }
+  }
+
+  // Watch for DOM changes to apply overlays to new videos
+  function observeForOverlays() {
+    // Apply overlays on initial load
+    setTimeout(() => applyVisualOverlays(), 3000);
+    
+    // Watch for new videos being loaded
+    const overlayObserver = new MutationObserver((mutations) => {
+      let shouldCheck = false;
+      for (const mutation of mutations) {
+        if (mutation.addedNodes.length > 0) {
+          for (const node of mutation.addedNodes) {
+            if (node.nodeType === 1 && (
+              node.tagName === 'YTD-COMPACT-VIDEO-RENDERER' ||
+              node.tagName === 'YTD-VIDEO-RENDERER' ||
+              node.tagName === 'YTD-RICH-ITEM-RENDERER'
+            )) {
+              shouldCheck = true;
+              break;
+            }
+          }
+        }
+        if (shouldCheck) break;
+      }
+      
+      if (shouldCheck) {
+        // Debounce
+        setTimeout(() => applyVisualOverlays(), 1000);
+      }
+    });
+    
+    // Wait for body
+    if (document.body) {
+      overlayObserver.observe(document.body, { childList: true, subtree: true });
+    } else {
+      const waiter = setInterval(() => {
+        if (document.body) {
+          clearInterval(waiter);
+          overlayObserver.observe(document.body, { childList: true, subtree: true });
+        }
+      }, 100);
+    }
+  }
+
+  // Initialize overlay system after main init
+  function initOverlays() {
+    console.log('[EchoBreaker] Initializing overlay system');
+    injectOverlayStyles();
+    observeForOverlays();
+  }
+
   // Start
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', init);
+    document.addEventListener('DOMContentLoaded', () => {
+      init();
+      setTimeout(initOverlays, 2000);
+    });
   } else {
     init();
+    setTimeout(initOverlays, 2000);
   }
 })();

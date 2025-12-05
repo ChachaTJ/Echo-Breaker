@@ -290,7 +290,6 @@ export async function registerRoutes(
       }
       
       const insights = await storage.getVideoInsights();
-      const videos = await storage.getVideos();
       
       // Build stance map for requested video IDs
       const stances: Record<string, {
@@ -302,26 +301,27 @@ export async function registerRoutes(
       }> = {};
       
       // Calculate user's dominant stance from their watch history
+      // Only count political content (not non-political)
       const stanceCounts: Record<string, number> = {
         progressive: 0,
         conservative: 0,
-        centrist: 0,
-        'non-political': 0
+        centrist: 0
       };
       
       for (const insight of insights) {
-        if (insight.stance && stanceCounts.hasOwnProperty(insight.stance)) {
+        if (insight.stance && insight.stance !== 'non-political' && stanceCounts.hasOwnProperty(insight.stance)) {
           stanceCounts[insight.stance]++;
         }
       }
       
-      const totalStanced = Object.values(stanceCounts).reduce((a, b) => a + b, 0);
+      const totalPolitical = Object.values(stanceCounts).reduce((a, b) => a + b, 0);
       let dominantStance: string | null = null;
-      if (totalStanced > 3) {
-        // Need at least 3 analyzed videos to determine dominant stance
+      
+      // Need at least 5 political videos to determine dominant stance
+      if (totalPolitical >= 5) {
         const sorted = Object.entries(stanceCounts).sort((a, b) => b[1] - a[1]);
-        if (sorted[0][1] > totalStanced * 0.4) {
-          // Dominant if >40% of videos
+        // Dominant if >50% of political videos (strong majority)
+        if (sorted[0][1] > totalPolitical * 0.5) {
           dominantStance = sorted[0][0];
         }
       }
@@ -329,21 +329,24 @@ export async function registerRoutes(
       for (const videoId of videoIds) {
         const insight = insights.find(i => i.videoId === videoId);
         
-        if (insight) {
-          // Determine if this video reinforces echo chamber or provides diversity
-          let isEchoChamber = false;
-          let isDiverse = false;
-          
-          if (dominantStance && insight.stance) {
-            if (insight.stance === dominantStance) {
+        // Default: no echo chamber, no diversity for unanalyzed videos
+        let isEchoChamber = false;
+        let isDiverse = false;
+        
+        if (insight && insight.stance) {
+          // Only mark echo chamber/diverse for political content
+          if (dominantStance && insight.stance !== 'non-political') {
+            if (insight.stance === dominantStance && insight.stance !== 'centrist') {
+              // Same political leaning as dominant = echo chamber
               isEchoChamber = true;
-            } else if (insight.stance !== 'non-political' && insight.stance !== 'centrist') {
+            } else if (insight.stance !== 'centrist') {
               // Opposite political stance = diverse
               if ((dominantStance === 'progressive' && insight.stance === 'conservative') ||
                   (dominantStance === 'conservative' && insight.stance === 'progressive')) {
                 isDiverse = true;
               }
             }
+            // Centrist content is neither echo chamber nor diverse - it's balanced
           }
           
           stances[videoId] = {
@@ -354,12 +357,14 @@ export async function registerRoutes(
             isDiverse
           };
         }
+        // Don't add entry for unanalyzed videos - they'll be skipped in overlay
       }
       
       res.json({ 
         stances, 
         dominantStance,
-        totalAnalyzed: insights.length
+        totalAnalyzed: insights.length,
+        totalPolitical
       });
     } catch (error) {
       console.error('Failed to get video stances:', error);

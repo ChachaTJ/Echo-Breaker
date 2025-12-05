@@ -282,45 +282,69 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   if (info.menuItemId === 'echobreaker-open-safe' || info.menuItemId === 'echobreaker-open-safe-video') {
     let url = info.linkUrl || info.srcUrl || info.pageUrl;
     
-    // Extract video URL from various YouTube URL formats
-    if (url) {
-      // Handle youtu.be short links
-      if (url.includes('youtu.be/')) {
-        const videoId = url.split('youtu.be/')[1]?.split('?')[0];
-        if (videoId) {
-          url = `https://www.youtube.com/watch?v=${videoId}`;
-        }
+    if (!url) {
+      console.log('[EchoBreaker] No URL found for context menu action');
+      return;
+    }
+    
+    // Extract video ID from various YouTube URL formats
+    let videoId = null;
+    
+    // Handle youtu.be short links
+    if (url.includes('youtu.be/')) {
+      videoId = url.split('youtu.be/')[1]?.split('?')[0]?.split('/')[0];
+    }
+    // Handle youtube.com/watch?v=
+    else if (url.includes('/watch')) {
+      try {
+        const urlObj = new URL(url);
+        videoId = urlObj.searchParams.get('v');
+      } catch (e) {
+        // Invalid URL
       }
+    }
+    // Handle youtube.com/shorts/
+    else if (url.includes('/shorts/')) {
+      videoId = url.split('/shorts/')[1]?.split('?')[0]?.split('/')[0];
+    }
+    // Handle youtube.com/embed/
+    else if (url.includes('/embed/')) {
+      videoId = url.split('/embed/')[1]?.split('?')[0]?.split('/')[0];
+    }
+    
+    // Only proceed if we found a valid video ID
+    if (!videoId || videoId.length < 5) {
+      console.log('[EchoBreaker] Invalid or missing video ID from URL:', url);
+      return;
+    }
+    
+    // Build clean watch URL
+    const watchUrl = `https://www.youtube.com/watch?v=${videoId}`;
+    
+    try {
+      // Try to open in incognito window
+      await chrome.windows.create({
+        url: watchUrl,
+        incognito: true,
+        focused: true
+      });
+      console.log('[EchoBreaker] Opened in incognito:', watchUrl);
+    } catch (error) {
+      // If incognito fails (extension not allowed in incognito)
+      console.log('[EchoBreaker] Incognito failed:', error.message);
       
-      // Ensure it's a YouTube video URL
-      if (url.includes('youtube.com') || url.includes('youtu.be')) {
-        try {
-          // Try to open in incognito window
-          await chrome.windows.create({
-            url: url,
-            incognito: true,
-            focused: true
-          });
-          console.log('[EchoBreaker] Opened in incognito:', url);
-        } catch (error) {
-          // If incognito fails (user may have disabled), open in new regular window with note
-          console.log('[EchoBreaker] Incognito failed, trying logged-out approach:', error.message);
-          
-          // Open in a new window - user may need to manually log out or use private browsing
-          await chrome.windows.create({
-            url: url,
-            focused: true
-          });
-          
-          // Notify user
-          chrome.notifications?.create?.({
-            type: 'basic',
-            iconUrl: 'icons/icon48.png',
-            title: 'EchoBreaker',
-            message: 'Incognito mode is disabled. To avoid affecting your algorithm, please log out of YouTube in this window.'
-          });
-        }
-      }
+      // Open YouTube embed version in a new window (logged out experience)
+      // Embed URL doesn't use login session
+      const embedUrl = `https://www.youtube.com/embed/${videoId}?autoplay=1`;
+      
+      await chrome.windows.create({
+        url: embedUrl,
+        focused: true,
+        width: 1280,
+        height: 720
+      });
+      
+      console.log('[EchoBreaker] Opened embed (no login):', embedUrl);
     }
   }
 });
