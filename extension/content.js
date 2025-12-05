@@ -1350,86 +1350,162 @@
 
   // Find best insertion point in YouTube DOM
   function findInsertionPoint() {
-    // Try sidebar (watch page)
-    const sidebar = document.querySelector('#secondary-inner, #related');
-    if (sidebar) {
-      return { element: sidebar, position: 'prepend' };
+    // Try sidebar (watch page) - multiple selectors for different YouTube layouts
+    const sidebarSelectors = [
+      '#secondary-inner #related',
+      '#secondary #related',
+      '#related',
+      'ytd-watch-next-secondary-results-renderer'
+    ];
+    
+    for (const selector of sidebarSelectors) {
+      const element = document.querySelector(selector);
+      if (element && element.offsetParent !== null) {
+        console.log('[EchoBreaker] Found sidebar insertion point:', selector);
+        return { element, position: 'prepend' };
+      }
     }
     
     // Try home page content
-    const homeContent = document.querySelector('ytd-rich-grid-renderer #contents');
-    if (homeContent) {
-      return { element: homeContent, position: 'prepend' };
+    const homeSelectors = [
+      'ytd-rich-grid-renderer #contents',
+      'ytd-two-column-browse-results-renderer #primary #contents',
+      '#page-manager ytd-browse #contents'
+    ];
+    
+    for (const selector of homeSelectors) {
+      const element = document.querySelector(selector);
+      if (element && element.offsetParent !== null) {
+        console.log('[EchoBreaker] Found home insertion point:', selector);
+        return { element, position: 'prepend' };
+      }
     }
     
     // Try search results
-    const searchResults = document.querySelector('ytd-section-list-renderer #contents');
-    if (searchResults) {
-      return { element: searchResults, position: 'prepend' };
+    const searchSelectors = [
+      'ytd-section-list-renderer #contents',
+      'ytd-search #contents'
+    ];
+    
+    for (const selector of searchSelectors) {
+      const element = document.querySelector(selector);
+      if (element && element.offsetParent !== null) {
+        console.log('[EchoBreaker] Found search insertion point:', selector);
+        return { element, position: 'prepend' };
+      }
     }
     
     return null;
   }
 
   // Inject recommendations into YouTube DOM
+  let injectionAttempts = 0;
+  const MAX_INJECTION_ATTEMPTS = 10;
+  
   async function injectDiverseRecommendations() {
     // Don't inject if already present
     if (document.getElementById('echobreaker-diverse-recs')) {
-      return;
+      console.log('[EchoBreaker] Recommendations already injected');
+      return true;
     }
     
     injectRecommendationStyles();
     
-    const { recommendations, targetPerspective } = await getDiverseRecommendations();
+    console.log('[EchoBreaker] Fetching diverse recommendations...');
+    const response = await getDiverseRecommendations();
+    const { recommendations, targetPerspective } = response;
     
     if (!recommendations || recommendations.length === 0) {
       console.log('[EchoBreaker] No diverse recommendations available');
-      return;
+      return false;
     }
     
     const insertPoint = findInsertionPoint();
     if (!insertPoint) {
-      console.log('[EchoBreaker] No suitable insertion point found');
-      return;
+      injectionAttempts++;
+      console.log(`[EchoBreaker] No insertion point found (attempt ${injectionAttempts}/${MAX_INJECTION_ATTEMPTS})`);
+      
+      // Retry if page is still loading
+      if (injectionAttempts < MAX_INJECTION_ATTEMPTS) {
+        setTimeout(() => injectDiverseRecommendations(), 2000);
+      }
+      return false;
     }
+    
+    // Reset attempts on success
+    injectionAttempts = 0;
     
     const container = createRecommendationContainer(recommendations, targetPerspective);
     
-    if (insertPoint.position === 'prepend') {
-      insertPoint.element.insertBefore(container, insertPoint.element.firstChild);
-    } else {
-      insertPoint.element.appendChild(container);
+    try {
+      if (insertPoint.position === 'prepend') {
+        insertPoint.element.insertBefore(container, insertPoint.element.firstChild);
+      } else {
+        insertPoint.element.appendChild(container);
+      }
+      
+      console.log(`[EchoBreaker] Successfully injected ${recommendations.length} diverse recommendations`);
+      return true;
+    } catch (error) {
+      console.error('[EchoBreaker] Failed to inject recommendations:', error);
+      return false;
     }
-    
-    console.log(`[EchoBreaker] Injected ${recommendations.length} diverse recommendations`);
   }
 
   // Watch for page navigation to inject recommendations
   function observeForRecommendationInjection() {
-    // Initial injection after page loads
-    setTimeout(() => injectDiverseRecommendations(), 3000);
+    // Initial injection - try immediately and retry
+    console.log('[EchoBreaker] Starting recommendation injection observer');
+    
+    // Try multiple times with increasing delays
+    const tryInject = async (delay) => {
+      await new Promise(resolve => setTimeout(resolve, delay));
+      const success = await injectDiverseRecommendations();
+      return success;
+    };
+    
+    // Attempt injection at different intervals
+    tryInject(1000);
+    tryInject(3000);
+    tryInject(6000);
     
     // Watch for YouTube SPA navigation
     let lastUrl = location.href;
-    const navObserver = new MutationObserver(() => {
+    const navObserver = new MutationObserver((mutations) => {
       if (location.href !== lastUrl) {
         lastUrl = location.href;
+        console.log('[EchoBreaker] URL changed, reinitializing recommendations');
+        
         // Remove existing container on navigation
         const existing = document.getElementById('echobreaker-diverse-recs');
-        if (existing) existing.remove();
-        // Re-inject after navigation
-        setTimeout(() => injectDiverseRecommendations(), 2000);
+        if (existing) {
+          existing.remove();
+        }
+        
+        // Reset injection attempts
+        injectionAttempts = 0;
+        
+        // Re-inject after navigation with delays
+        tryInject(1500);
+        tryInject(4000);
       }
     });
     
-    if (document.body) {
-      navObserver.observe(document.body, { childList: true, subtree: true });
-    }
+    // Start observing
+    const startObserving = () => {
+      if (document.body) {
+        navObserver.observe(document.body, { childList: true, subtree: true });
+        console.log('[EchoBreaker] Navigation observer started');
+      } else {
+        setTimeout(startObserving, 500);
+      }
+    };
+    startObserving();
   }
 
   // Initialize recommendation injection
   function initRecommendations() {
-    console.log('[EchoBreaker] Initializing AI recommendation injection');
+    console.log('[EchoBreaker] Initializing AI recommendation injection system');
     injectRecommendationStyles();
     observeForRecommendationInjection();
   }
