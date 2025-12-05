@@ -454,10 +454,10 @@ export default function Analysis() {
                 <div>
                   <CardTitle className="flex items-center gap-2">
                     <Brain className="h-5 w-5" />
-                    AI 시청 패턴 분석
+                    AI Viewing Pattern Analysis
                   </CardTitle>
                   <CardDescription>
-                    Gemini AI가 분석한 당신의 시청 패턴과 에코 체임버 위험도
+                    Gemini AI analyzes your viewing patterns and echo chamber risk
                   </CardDescription>
                 </div>
                 <Button
@@ -467,7 +467,7 @@ export default function Analysis() {
                   data-testid="button-fetch-ai-insights"
                 >
                   <Brain className={`h-4 w-4 ${insightsLoading ? 'animate-pulse' : ''}`} />
-                  {insightsLoading ? 'AI 분석 중...' : 'AI 분석 실행'}
+                  {insightsLoading ? 'Analyzing...' : 'Run AI Analysis'}
                 </Button>
               </div>
             </CardHeader>
@@ -492,14 +492,14 @@ export default function Analysis() {
                     <div className="p-4 rounded-lg border">
                       <div className="flex items-center gap-2 mb-2">
                         <Shield className="h-4 w-4" />
-                        <span className="font-medium">에코 체임버 위험도</span>
+                        <span className="font-medium">Echo Chamber Risk</span>
                       </div>
                       <div className="flex items-center gap-2 mb-2">
                         <Badge 
                           variant={aiInsights.echoChamberRisk === 'high' ? 'destructive' : aiInsights.echoChamberRisk === 'medium' ? 'default' : 'secondary'}
                           className="text-sm"
                         >
-                          {aiInsights.echoChamberRisk === 'high' ? '높음' : aiInsights.echoChamberRisk === 'medium' ? '중간' : '낮음'}
+                          {aiInsights.echoChamberRisk === 'high' ? 'High' : aiInsights.echoChamberRisk === 'medium' ? 'Medium' : 'Low'}
                         </Badge>
                       </div>
                       <p className="text-sm text-muted-foreground">{aiInsights.echoChamberExplanation}</p>
@@ -508,7 +508,7 @@ export default function Analysis() {
                     <div className="p-4 rounded-lg border">
                       <div className="flex items-center gap-2 mb-2">
                         <Gauge className="h-4 w-4" />
-                        <span className="font-medium">다양성 점수</span>
+                        <span className="font-medium">Diversity Score</span>
                       </div>
                       <div className="flex items-center gap-2">
                         <span className="text-3xl font-bold">{aiInsights.diversityScore}</span>
@@ -523,7 +523,7 @@ export default function Analysis() {
                     <div>
                       <h4 className="font-medium mb-3 flex items-center gap-2">
                         <Sparkles className="h-4 w-4" />
-                        AI 분류 카테고리
+                        AI Content Categories
                       </h4>
                       <div className="space-y-2">
                         {aiInsights.aiClassifications.map((cat, i) => (
@@ -550,7 +550,7 @@ export default function Analysis() {
                     <div>
                       <h4 className="font-medium mb-2 flex items-center gap-2">
                         <TrendingUp className="h-4 w-4" />
-                        주요 테마
+                        Dominant Themes
                       </h4>
                       <div className="flex flex-wrap gap-2">
                         {aiInsights.dominantThemes.map((theme, i) => (
@@ -561,7 +561,7 @@ export default function Analysis() {
                     <div>
                       <h4 className="font-medium mb-2 flex items-center gap-2">
                         <AlertTriangle className="h-4 w-4 text-orange-500" />
-                        시청하지 않는 분야
+                        Blind Spots
                       </h4>
                       <div className="flex flex-wrap gap-2">
                         {aiInsights.blindSpots.map((spot, i) => (
@@ -575,7 +575,7 @@ export default function Analysis() {
                   <div className="p-4 rounded-lg bg-primary/5 border border-primary/20">
                     <h4 className="font-medium mb-2 flex items-center gap-2">
                       <Lightbulb className="h-4 w-4 text-primary" />
-                      AI 추천
+                      AI Recommendations
                     </h4>
                     <ul className="space-y-1 text-sm text-muted-foreground">
                       {aiInsights.recommendations.map((rec, i) => (
@@ -590,8 +590,8 @@ export default function Analysis() {
               ) : (
                 <div className="flex flex-col items-center justify-center py-8 text-center text-muted-foreground">
                   <Brain className="h-12 w-12 mb-4 opacity-30" />
-                  <p>AI 분석을 실행하여 시청 패턴 인사이트를 확인하세요</p>
-                  <p className="text-sm mt-1">최소 3개의 영상이 필요합니다</p>
+                  <p>Run AI analysis to see viewing pattern insights</p>
+                  <p className="text-sm mt-1">At least 3 videos are needed</p>
                 </div>
               )}
             </CardContent>
