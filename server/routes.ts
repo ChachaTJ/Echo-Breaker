@@ -281,6 +281,92 @@ export async function registerRoutes(
     }
   });
 
+  // Get video stances for extension overlay
+  app.post("/api/videos/stances", async (req, res) => {
+    try {
+      const { videoIds } = req.body;
+      if (!videoIds || !Array.isArray(videoIds)) {
+        return res.status(400).json({ error: "videoIds array required" });
+      }
+      
+      const insights = await storage.getVideoInsights();
+      const videos = await storage.getVideos();
+      
+      // Build stance map for requested video IDs
+      const stances: Record<string, {
+        stance: string | null;
+        stanceProbabilities: Record<string, number> | null;
+        contentType: string | null;
+        isEchoChamber: boolean;
+        isDiverse: boolean;
+      }> = {};
+      
+      // Calculate user's dominant stance from their watch history
+      const stanceCounts: Record<string, number> = {
+        progressive: 0,
+        conservative: 0,
+        centrist: 0,
+        'non-political': 0
+      };
+      
+      for (const insight of insights) {
+        if (insight.stance && stanceCounts.hasOwnProperty(insight.stance)) {
+          stanceCounts[insight.stance]++;
+        }
+      }
+      
+      const totalStanced = Object.values(stanceCounts).reduce((a, b) => a + b, 0);
+      let dominantStance: string | null = null;
+      if (totalStanced > 3) {
+        // Need at least 3 analyzed videos to determine dominant stance
+        const sorted = Object.entries(stanceCounts).sort((a, b) => b[1] - a[1]);
+        if (sorted[0][1] > totalStanced * 0.4) {
+          // Dominant if >40% of videos
+          dominantStance = sorted[0][0];
+        }
+      }
+      
+      for (const videoId of videoIds) {
+        const insight = insights.find(i => i.videoId === videoId);
+        
+        if (insight) {
+          // Determine if this video reinforces echo chamber or provides diversity
+          let isEchoChamber = false;
+          let isDiverse = false;
+          
+          if (dominantStance && insight.stance) {
+            if (insight.stance === dominantStance) {
+              isEchoChamber = true;
+            } else if (insight.stance !== 'non-political' && insight.stance !== 'centrist') {
+              // Opposite political stance = diverse
+              if ((dominantStance === 'progressive' && insight.stance === 'conservative') ||
+                  (dominantStance === 'conservative' && insight.stance === 'progressive')) {
+                isDiverse = true;
+              }
+            }
+          }
+          
+          stances[videoId] = {
+            stance: insight.stance,
+            stanceProbabilities: insight.stanceProbabilities as Record<string, number> | null,
+            contentType: insight.contentType,
+            isEchoChamber,
+            isDiverse
+          };
+        }
+      }
+      
+      res.json({ 
+        stances, 
+        dominantStance,
+        totalAnalyzed: insights.length
+      });
+    } catch (error) {
+      console.error('Failed to get video stances:', error);
+      res.status(500).json({ error: "Failed to get video stances" });
+    }
+  });
+
   // Extension status and version endpoint
   app.get("/api/extension/status", (req, res) => {
     const isConnected = extensionConnection && 
